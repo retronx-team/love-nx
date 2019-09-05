@@ -3263,6 +3263,12 @@ function love.nogame()
 		end
 	end
 
+	function love.gamepadpressed(joystick, button)
+		if button == "start" or button == "b" or button == "a" then
+			love.event.quit()
+		end
+	end
+
 	function love.resize()
 		create_world()
 	end
@@ -3272,12 +3278,17 @@ function love.nogame()
 		t.gammacorrect = true
 		t.modules.audio = false
 		t.modules.sound = false
-		t.modules.joystick = false
+		t.modules.joystick = true
 		t.window.resizable = true
 		t.window.highdpi = true
 
 		if love._os == "iOS" then
 			t.window.borderless = true
+		end
+
+		if love._os == "NX" then
+			t.window.width = 1280
+			t.window.height = 720
 		end
 	end
 end

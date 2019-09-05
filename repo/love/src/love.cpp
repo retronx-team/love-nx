@@ -45,6 +45,10 @@ extern "C" {
 #include "common/ios.h"
 #endif
 
+#ifdef LOVE_NX
+#include "common/nx.h"
+#endif
+
 #ifdef LOVE_WINDOWS
 extern "C"
 {
@@ -96,6 +100,8 @@ static void get_app_arguments(int argc, char **argv, int &new_argc, char **&new_
 		loveResourcesPath = love::macosx::getLoveInResources();
 #elif defined(LOVE_IOS)
 		loveResourcesPath = love::ios::getLoveInResources(fused);
+#elif defined(LOVE_NX)
+		loveResourcesPath = love::nx::getLoveInResources(fused);
 #endif
 		if (!loveResourcesPath.empty())
 		{
@@ -107,7 +113,6 @@ static void get_app_arguments(int argc, char **argv, int &new_argc, char **&new_
 				temp_argv.insert(it + 1, std::string("--fused"));
 		}
 	}
-
 	// Copy temp argv vector to new argv array.
 	new_argc = (int) temp_argv.size();
 	new_argv = new char *[new_argc+1];

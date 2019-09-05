@@ -52,7 +52,7 @@ function love.path.abs(p)
 
 	-- Path is absolute if it starts with a
 	-- letter followed by a colon.
-	if tmp:find("%a:") == 1 then
+	if tmp:find("%a+:") == 1 then
 		return true
 	end
 
@@ -338,6 +338,7 @@ function love.boot()
 		end
 
 		local full_source = love.path.getFull(nouri)
+
 		can_has_game = pcall(love.filesystem.setSource, full_source)
 
 		if not can_has_game then
@@ -716,7 +717,9 @@ function love.errhand(msg)
 		draw()
 	end
 
-	if love.system then
+	if love._os == "NX" then
+		p = p .. "\n\nPress B/A/Start or tap to exit"
+	elseif love.system then
 		p = p .. "\n\nPress Ctrl+C or tap to copy this error"
 	end
 
@@ -730,7 +733,12 @@ function love.errhand(msg)
 				return 1
 			elseif e == "keypressed" and a == "c" and love.keyboard.isDown("lctrl", "rctrl") then
 				copyToClipboard()
+			elseif e == "gamepadpressed" and love._os == "NX" and (b == "b" or b == "a" or "start") then
+				return 1
 			elseif e == "touchpressed" then
+				if love._os == "NX" then
+					return 1
+				end
 				local name = love.window.getTitle()
 				if #name == 0 or name == "Untitled" then name = "Game" end
 				local buttons = {"OK", "Cancel"}

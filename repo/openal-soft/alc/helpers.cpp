@@ -551,6 +551,9 @@ void SetRTPriority(void)
 #include <sched.h>
 #endif
 
+#ifdef __SWITCH__
+    extern char** __system_argv;
+#endif
 const PathNamePair &GetProcBinary()
 {
     static PathNamePair ret;
@@ -585,6 +588,9 @@ const PathNamePair &GetProcBinary()
     {
         pathname.resize(256);
 
+#ifdef __SWITCH__
+        strncpy(pathname.data(), __system_argv[0], pathname.size());
+#else
         const char *selfname{"/proc/self/exe"};
         ssize_t len{readlink(selfname, pathname.data(), pathname.size())};
         if(len == -1 && errno == ENOENT)
@@ -615,6 +621,7 @@ const PathNamePair &GetProcBinary()
         }
 
         pathname.resize(len);
+#endif
     }
     while(!pathname.empty() && pathname.back() == 0)
         pathname.pop_back();

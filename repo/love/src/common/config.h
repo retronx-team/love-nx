@@ -48,9 +48,13 @@
 #		define LOVE_MACOSX 1
 #	endif
 #endif
-#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__SWITCH__)
 // I know it's not linux, but it seems most "linux-only" code is bsd-compatible
 #	define LOVE_LINUX 1
+#endif
+
+#if defined(__SWITCH__)
+# define LOVE_NX 1
 #endif
 
 // Endianness.
@@ -117,7 +121,7 @@
 #	define NOMINMAX
 #endif
 
-#if defined(LOVE_MACOSX) || defined(LOVE_IOS)
+#if defined(LOVE_MACOSX) || defined(LOVE_IOS) || defined(LOVE_NX)
 #	define LOVE_LEGENDARY_APP_ARGV_HACK
 #endif
 

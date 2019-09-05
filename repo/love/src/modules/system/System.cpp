@@ -42,6 +42,10 @@
 #include <spawn.h>
 #endif
 
+#if defined(LOVE_NX)
+#include "common/nx.h"
+#endif
+
 namespace love
 {
 namespace system
@@ -63,6 +67,8 @@ std::string System::getOS() const
 	return "Windows";
 #elif defined(LOVE_ANDROID)
 	return "Android";
+#elif defined(LOVE_NX)
+	return "NX";
 #elif defined(LOVE_LINUX)
 	return "Linux";
 #else
@@ -98,6 +104,10 @@ bool System::openURL(const std::string &url) const
 #elif defined(LOVE_ANDROID)
 
 	return love::android::openURL(url);
+
+#elif defined(LOVE_NX)
+
+	return love::nx::openURL(url);
 
 #elif defined(LOVE_LINUX)
 

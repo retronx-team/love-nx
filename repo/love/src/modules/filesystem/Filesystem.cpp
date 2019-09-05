@@ -37,6 +37,10 @@
 #include <unistd.h>
 #endif
 
+#if defined(LOVE_NX)
+#include "common/nx.h"
+#endif
+
 namespace love
 {
 namespace filesystem
@@ -105,6 +109,8 @@ std::string Filesystem::getExecutablePath() const
 
 	return to_utf8(buffer);
 
+#elif defined(LOVE_NX)
+	return love::nx::getExecutablePath();
 #elif defined(LOVE_LINUX)
 
 	char buffer[2048] = {0};

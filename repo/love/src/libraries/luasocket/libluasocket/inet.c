@@ -375,6 +375,7 @@ const char *inet_trydisconnect(p_socket ps, int family, p_timeout tm)
             return socket_strerror(socket_connect(ps, (SA *) &sin,
                 sizeof(sin), tm));
         }
+#ifndef __SWITCH__
         case AF_INET6: {
             struct sockaddr_in6 sin6;
             struct in6_addr addrany = IN6ADDR_ANY_INIT;
@@ -384,6 +385,7 @@ const char *inet_trydisconnect(p_socket ps, int family, p_timeout tm)
             return socket_strerror(socket_connect(ps, (SA *) &sin6,
                 sizeof(sin6), tm));
         }
+#endif
     }
     return NULL;
 }

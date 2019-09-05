@@ -17,10 +17,10 @@ TESTS= -g -DLUA_USER_H='"ltests.h"'
 LOCAL = $(TESTS) $(CWARNS)
 
 
-CC= gcc
-CFLAGS= -Wall $(MYCFLAGS) -O2
-AR= ar rcu
-RANLIB= ranlib
+CC= $(TOOL_PREFIX)gcc
+#CFLAGS= -Wall $(MYCFLAGS) -O2
+AR= $(TOOL_PREFIX)ar rcu
+RANLIB= $(TOOL_PREFIX)ranlib
 RM= rm -f
 
 MYCFLAGS= $(LOCAL)
@@ -29,9 +29,9 @@ MYLIBS=
 
 
 # enable Linux goodies
-MYCFLAGS= $(LOCAL) -DLUA_USE_LINUX
-MYLDFLAGS= -Wl,-E
-MYLIBS= -ldl -lreadline -lhistory -lncurses
+MYCFLAGS= $(CFLAGS) $(LOCAL) -DLUA_USE_MKSTEMP
+MYLDFLAGS= $(LDFLAGS) -Wl,-E
+MYLIBS= $(LIBS)
 
 
 
@@ -46,7 +46,7 @@ CORE_O=	lapi.o lcode.o ldebug.o ldo.o ldump.o lfunc.o lgc.o llex.o lmem.o \
 	lundump.o lvm.o lzio.o ltests.o
 AUX_O=	lauxlib.o
 LIB_O=	lbaselib.o ldblib.o liolib.o lmathlib.o loslib.o ltablib.o lstrlib.o \
-	loadlib.o linit.o
+	loadlib.o linit.o bit.o
 
 LUA_T=	lua
 LUA_O=	lua.o
@@ -120,6 +120,7 @@ liolib.o: liolib.c lua.h luaconf.h lauxlib.h lualib.h
 llex.o: llex.c lua.h luaconf.h ldo.h lobject.h llimits.h lstate.h ltm.h \
   lzio.h lmem.h llex.h lparser.h ltable.h lstring.h lgc.h
 lmathlib.o: lmathlib.c lua.h luaconf.h lauxlib.h lualib.h
+bit.o: bit.c lua.h luaconf.h lauxlib.h lualib.h
 lmem.o: lmem.c lua.h luaconf.h ldebug.h lstate.h lobject.h llimits.h \
   ltm.h lzio.h lmem.h ldo.h
 loadlib.o: loadlib.c lua.h luaconf.h lauxlib.h lualib.h

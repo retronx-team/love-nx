@@ -157,7 +157,7 @@ Conditional *ConditionalRef::operator->() const
 	return conditional;
 }
 
-#if defined(LOVE_LINUX)
+#if defined(LOVE_LINUX) and !defined(LOVE_NX)
 static sigset_t oldset;
 
 void disableSignals()

@@ -53,6 +53,10 @@
 #include "common/android.h"
 #endif
 
+#if defined(LOVE_NX)
+#include "common/nx.h"
+#endif
+
 namespace
 {
 	size_t getDriveDelim(const std::string &input)
@@ -479,6 +483,8 @@ std::string Filesystem::getUserDirectory()
 #ifdef LOVE_IOS
 	// PHYSFS_getUserDir doesn't give exactly the path we want on iOS.
 	static std::string userDir = normalize(love::ios::getHomeDirectory());
+#elif defined(LOVE_NX)
+	static std::string userDir = normalize(love::nx::getUserDirectory());
 #else
 	static std::string userDir = normalize(PHYSFS_getUserDir());
 #endif
@@ -490,7 +496,7 @@ std::string Filesystem::getAppdataDirectory()
 {
 	if (appdata.empty())
 	{
-#ifdef LOVE_WINDOWS_UWP
+#if defined(LOVE_WINDOWS_UWP) || defined(LOVE_NX)
 		appdata = getUserDirectory();
 #elif defined(LOVE_WINDOWS)
 		wchar_t *w_appdata = _wgetenv(L"APPDATA");
@@ -502,7 +508,7 @@ std::string Filesystem::getAppdataDirectory()
 		appdata = normalize(udir);
 #elif defined(LOVE_IOS)
 		appdata = normalize(love::ios::getAppdataDirectory());
-#elif defined(LOVE_LINUX)
+#elif defined(LOVE_LINUX) and !defined(LOVE_NX)
 		char *xdgdatahome = getenv("XDG_DATA_HOME");
 		if (!xdgdatahome)
 			appdata = normalize(std::string(getUserDirectory()) + "/.local/share/");

@@ -33,6 +33,10 @@
 #include "common/config.h"
 #include "timer/Timer.h"
 
+#ifdef LOVE_NX
+#include "common/nx.h"
+#endif
+
 #include <cmath>
 
 namespace love
@@ -170,6 +174,10 @@ void Event::exceptionIfInRenderPass(const char *name)
 
 Message *Event::convert(const SDL_Event &e)
 {
+#ifdef LOVE_NX
+	love::nx::fakeMouseEvents(e);
+#endif
+
 	Message *msg = nullptr;
 
 	std::vector<Variant> vargs;

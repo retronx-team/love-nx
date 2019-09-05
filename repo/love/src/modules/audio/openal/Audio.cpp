@@ -96,7 +96,7 @@ Audio::Audio()
 	, poolThread(nullptr)
 	, distanceModel(DISTANCE_INVERSE_CLAMPED)
 {
-#if defined(LOVE_LINUX)
+#if defined(LOVE_LINUX) and !defined(LOVE_NX)
 	// Temporarly block signals, as the thread inherits this mask
 	love::thread::disableSignals();
 #endif
@@ -121,7 +121,7 @@ Audio::Audio()
 	if (!alcMakeContextCurrent(context) || alcGetError(device) != ALC_NO_ERROR)
 		throw love::Exception("Could not make context current.");
 
-#if defined(LOVE_LINUX)
+#if defined(LOVE_LINUX) and !defined(LOVE_NX)
 	love::thread::reenableSignals();
 #endif
 

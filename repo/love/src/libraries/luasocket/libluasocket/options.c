@@ -277,6 +277,7 @@ static int opt_setmembership(lua_State *L, p_socket ps, int level, int name)
 
 static int opt_ip6_setmembership(lua_State *L, p_socket ps, int level, int name)
 {
+#ifndef __SWITCH__
     struct ipv6_mreq val;                   /* obj, opt-name, table */
     memset(&val, 0, sizeof(val));
     if (!lua_istable(L, 3)) auxiliar_typeerror(L,3,lua_typename(L, LUA_TTABLE));
@@ -299,6 +300,7 @@ static int opt_ip6_setmembership(lua_State *L, p_socket ps, int level, int name)
           luaL_argerror(L, -1, "number 'interface' field expected");
     }
     return opt_set(L, ps, level, name, (char *) &val, sizeof(val));
+#endif
 }
 
 static

@@ -42,7 +42,7 @@ Thread::~Thread()
 
 bool Thread::start()
 {
-#if defined(LOVE_LINUX)
+#if defined(LOVE_LINUX) and !defined(LOVE_NX)
 	// Temporarly block signals, as the thread inherits this mask
 	love::thread::disableSignals();
 #endif
@@ -55,7 +55,7 @@ bool Thread::start()
 	thread = SDL_CreateThread(thread_runner, t->getThreadName(), this);
 	running = (thread != nullptr);
 
-#if defined(LOVE_LINUX)
+#if defined(LOVE_LINUX) and !defined(LOVE_NX)
 	love::thread::reenableSignals();
 #endif
 	return running;

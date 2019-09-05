@@ -40,7 +40,7 @@ if(MSVC)
 	set(LOVE_CONSOLE_EXE_NAME lovec)
 endif()
 
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+if(CMAKE_SIZEOF_VOID_P EQUAL 8 OR SWITCH_LIBNX)
 	set(LOVE_X64 TRUE)
 	set(LOVE_TARGET_PLATFORM x64)
 else()
@@ -174,7 +174,11 @@ Please see http://bitbucket.org/rude/megasource
 	find_package(Freetype REQUIRED)
 	find_package(ModPlug REQUIRED)
 	find_package(OpenAL REQUIRED)
+if(SWITCH_LIBNX)
+	set(OPENGL_gl_LIBRARY "")
+else()
 	find_package(OpenGL REQUIRED)
+endif()
 	find_package(SDL2 REQUIRED)
 	find_package(Theora REQUIRED)
 	find_package(Vorbis REQUIRED)
@@ -316,6 +320,12 @@ set(LOVE_SRC_COMMON
 if (APPLE)
 	set(LOVE_SRC_COMMON ${LOVE_SRC_COMMON}
 		src/common/macosx.mm
+	)
+endif()
+
+if (SWITCH_LIBNX)
+	set(LOVE_SRC_COMMON ${LOVE_SRC_COMMON}
+		src/common/nx.cpp
 	)
 endif()
 
@@ -1504,6 +1514,12 @@ if(MSVC)
 		${LOVE_LINK_L3P_LUASOCKET_LIBLUASOCKET}
 		ws2_32.lib
 	)
+elseif(SWITCH_LIBNX)
+	set(LOVE_SRC_3P_LUASOCKET_LIBLUASOCKET
+		${LOVE_SRC_3P_LUASOCKET_LIBLUASOCKET}
+		src/libraries/luasocket/libluasocket/usocket.c
+		src/libraries/luasocket/libluasocket/usocket.h
+	)
 else()
 	set(LOVE_SRC_3P_LUASOCKET_LIBLUASOCKET
 		${LOVE_SRC_3P_LUASOCKET_LIBLUASOCKET}
@@ -1610,7 +1626,9 @@ if(APPLE)
 	)
 endif()
 
-add_library(love_3p_physfs ${LOVE_SRC_3P_PHYSFS})
+if(NOT SWITCH_LIBNX)
+	add_library(love_3p_physfs ${LOVE_SRC_3P_PHYSFS})
+endif()
 
 #
 # stb_image
@@ -1691,10 +1709,19 @@ set(LOVE_3P
 	love_3p_lua53
 	love_3p_lz4
 	love_3p_noise1234
-	love_3p_physfs
 	love_3p_wuff
 	love_3p_xxhash
 )
+
+if(SWITCH_LIBNX)
+	if(DEFINED PHYSFS_LIBRARY)
+		set(LOVE_3P ${LOVE_3P} ${PHYSFS_LIBRARY})
+	else()
+		message(FATAL_ERROR "Missing PHYSFS_LIBRARY")
+	endif()
+else()
+	set(LOVE_3P ${LOVE_3P} love_3p_physfs)
+endif()
 
 love_disable_warnings(love_3p_box2d love_3p_enet love_3p_luasocket love_3p_physfs)
 
@@ -1749,7 +1776,12 @@ if(MSVC)
 	)
 endif()
 
-add_library(${LOVE_LIB_NAME} SHARED ${LOVE_LIB_SRC} ${LOVE_RC})
+if(SWITCH_LIBNX)
+	add_library(${LOVE_LIB_NAME} STATIC ${LOVE_LIB_SRC} ${LOVE_RC})
+	set(LOVE_3P ${LOVE_3P} vorbis vorbisidec ogg bz2 png16 EGL glapi drm_nouveau nx)
+else()
+	add_library(${LOVE_LIB_NAME} SHARED ${LOVE_LIB_SRC} ${LOVE_RC})
+endif()
 target_link_libraries(${LOVE_LIB_NAME} ${LOVE_LINK_LIBRARIES} ${LOVE_3P})
 
 if(LOVE_EXTRA_DEPENDECIES)

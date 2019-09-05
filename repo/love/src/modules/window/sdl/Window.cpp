@@ -48,6 +48,10 @@
 #include "common/macosx.h"
 #endif
 
+#if defined(LOVE_NX)
+#include "common/nx.h"
+#endif
+
 #ifndef APIENTRY
 #define APIENTRY
 #endif
@@ -95,6 +99,9 @@ void Window::setGraphics(graphics::Graphics *graphics)
 
 void Window::setGLFramebufferAttributes(int msaa, bool sRGB, bool stencil, int depth)
 {
+#ifdef __SWITCH__
+return;
+#endif
 	// Set GL window / framebuffer attributes.
 	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
 	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
@@ -143,9 +150,15 @@ void Window::setGLContextAttributes(const ContextAttribs &attribs)
 	if (attribs.debug)
 		contextflags |= SDL_GL_CONTEXT_DEBUG_FLAG;
 
+#ifdef LOVE_NX
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, 0);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 0);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#else
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, attribs.versionMajor);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, attribs.versionMinor);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, profilemask);
+#endif
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, contextflags);
 }
 
@@ -207,7 +220,7 @@ std::vector<Window::ContextAttribs> Window::getContextAttribsList() const
 
 	bool preferGLES = false;
 
-#ifdef LOVE_GRAPHICS_USE_OPENGLES
+#if defined(LOVE_GRAPHICS_USE_OPENGLES)
 	preferGLES = true;
 #endif
 
@@ -317,8 +330,10 @@ bool Window::createWindowAndContext(int x, int y, int w, int h, Uint32 windowfla
 		// Make sure the context's version is at least what we requested.
 		if (context && !checkGLVersion(attribs, glversion))
 		{
+#ifndef LOVE_NX
 			SDL_GL_DeleteContext(context);
 			context = nullptr;
+#endif
 		}
 
 		if (!context)
@@ -407,6 +422,10 @@ bool Window::createWindowAndContext(int x, int y, int w, int h, Uint32 windowfla
 		return false;
 	}
 
+#ifdef LOVE_NX
+	love::nx::setSDLWindow(window);
+#endif
+
 	open = true;
 	return true;
 }
@@ -421,8 +440,10 @@ bool Window::setWindow(int width, int height, WindowSettings *settings)
 
 	WindowSettings f;
 
+#if !defined(LOVE_NX)
 	if (settings)
 		f = *settings;
+#endif
 
 	f.minwidth = std::max(f.minwidth, 1);
 	f.minheight = std::max(f.minheight, 1);
@@ -646,6 +667,10 @@ void Window::close()
 
 void Window::close(bool allowExceptions)
 {
+#ifdef LOVE_NX
+	love::nx::setSDLWindow(nullptr);
+#endif
+
 	if (graphics.get())
 	{
 		if (allowExceptions && graphics->isCanvasActive())
@@ -1173,14 +1198,21 @@ SDL_MessageBoxFlags Window::convertMessageBoxType(MessageBoxType type) const
 
 bool Window::showMessageBox(const std::string &title, const std::string &message, MessageBoxType type, bool attachtowindow)
 {
+#ifdef LOVE_NX
+	return love::nx::showMessageBox(title, message);
+#else
 	SDL_MessageBoxFlags flags = convertMessageBoxType(type);
 	SDL_Window *sdlwindow = attachtowindow ? window : nullptr;
 
 	return SDL_ShowSimpleMessageBox(flags, title.c_str(), message.c_str(), sdlwindow) >= 0;
+#endif
 }
 
 int Window::showMessageBox(const MessageBoxData &data)
 {
+#ifdef LOVE_NX
+	return love::nx::showMessageBox(data.title, data.message);
+#else
 	SDL_MessageBoxData sdldata = {};
 
 	sdldata.flags = convertMessageBoxType(data.type);
@@ -1214,6 +1246,7 @@ int Window::showMessageBox(const MessageBoxData &data)
 	SDL_ShowMessageBox(&sdldata, &pressedbutton);
 
 	return pressedbutton;
+#endif
 }
 
 void Window::requestAttention(bool continuous)

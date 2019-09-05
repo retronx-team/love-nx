@@ -129,7 +129,7 @@ Mutex *newMutex();
 Conditional *newConditional();
 Thread *newThread(Threadable *t);
 
-#if defined(LOVE_LINUX)
+#if defined(LOVE_LINUX) and !defined(LOVE_NX)
 void disableSignals();
 void reenableSignals();
 #endif

@@ -37,6 +37,9 @@ bool alignedMalloc(void **mem, size_t size, size_t alignment)
 #ifdef LOVE_WINDOWS
 	*mem = _aligned_malloc(size, alignment);
 	return *mem != nullptr;
+#elif defined(LOVE_NX)
+	*mem = aligned_alloc(size, alignment);
+	return *mem != nullptr;
 #else
 	return posix_memalign(mem, alignment, size) == 0;
 #endif
@@ -53,7 +56,7 @@ void alignedFree(void *mem)
 
 size_t getPageSize()
 {
-#ifdef LOVE_WINDOWS
+#if defined(LOVE_NX) || defined(LOVE_WINDOWS)
 	// TODO: Do an actual query.
 	return 4096;
 #else

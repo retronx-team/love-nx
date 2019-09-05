@@ -26,7 +26,11 @@
 #include "filesystem/File.h"
 
 // PhysFS
+#ifdef LOVE_NX
+#include <physfs.h>
+#else
 #include "libraries/physfs/physfs.h"
+#endif
 
 // STD
 #include <string>

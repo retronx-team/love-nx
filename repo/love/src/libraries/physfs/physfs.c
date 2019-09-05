@@ -957,9 +957,10 @@ static int sanitizePlatformIndependentPath(const char *src, char *dst)
     do
     {
         ch = *(src++);
-
+#ifndef __SWITCH__
         if ((ch == ':') || (ch == '\\'))  /* illegal chars in a physfs path. */
             BAIL(PHYSFS_ERR_BAD_FILENAME, 0);
+#endif
 
         if (ch == '/')   /* path separator. */
         {
