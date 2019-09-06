@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/git-commands/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/kcat/openal-soft
+	branch = master
+	commit = ef2769af03825f278b855858681e4cbe55c0734b
+	parent = f15c36b7291a8531f662ba52c2cf8d1e6ca38e38
+	method = merge
+	cmdver = 0.4.0
