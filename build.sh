@@ -23,7 +23,7 @@ make -j$JOBS
 echo "** env **"
 
 source "$DEVKITPRO/switchvars.sh"
-CFLAGS="$CFLAGS -I$PORTLIBS_PREFIX/include -D__SWITCH__ -I$DEVKITPRO/libnx/include"
+CFLAGS="$CFLAGS -g -I$PORTLIBS_PREFIX/include -D__SWITCH__ -I$DEVKITPRO/libnx/include"
 function switch_cmake() {
 	cmake -G"Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/switch.cmake" \
 		-DNX=1 \
@@ -34,12 +34,14 @@ function switch_cmake() {
 		"$@"
 }
 
-echo "** lua **"
+echo "** luajit **"
 
-mkdir -p "$BUILD_DIR/lua"
-cp -auf "$ROOT_DIR/repo/lua/." "$BUILD_DIR/lua"
-cd "$BUILD_DIR/lua"
-make -C "$BUILD_DIR/lua" -f "$BUILD_DIR/lua/makefile" -j$JOBS liblua.a
+mkdir -p "$BUILD_DIR/luajit"
+cp -auf "$ROOT_DIR/repo/luajit/." "$BUILD_DIR/luajit"
+make -C "$BUILD_DIR/luajit/src" -j$JOBS libluajit.a \
+	CROSS="$TOOL_PREFIX" CFLAGS="" LDFLAGS="" LIBS="" TARGET_SYS="SWITCH" BUILDMODE="static" \
+	XCFLAGS="-DLJ_TARGET_CONSOLE=1 -DLUAJIT_ENABLE_LUA52COMPAT -DLUAJIT_DISABLE_JIT -DLUAJIT_DISABLE_FFI -DLUAJIT_USE_SYSMALLOC" \
+	TARGET_CFLAGS="$CFLAGS" TARGET_LDFLAGS="$LDFLAGS" TARGET_LIBS="$LIBS"
 
 echo "** openal-soft **"
 
@@ -74,12 +76,11 @@ echo "** LÖVE **"
 mkdir -p "$BUILD_DIR/love"
 cd "$BUILD_DIR/love"
 switch_cmake \
-	-DLOVE_JIT:BOOL=OFF \
 	-DPHYSFS_LIBRARY="$BUILD_DIR/physfs/libphysfs.a" \
 	-DOPENAL_LIBRARY="$BUILD_DIR/openal-soft/libopenal.a" \
 	-DOPENAL_INCLUDE_DIR="$ROOT_DIR/repo/openal-soft/include" \
-	-DLUA_LIBRARY="$BUILD_DIR/lua/liblua.a" \
-	-DLUA_INCLUDE_DIR="$ROOT_DIR/repo/lua" \
+	-DLUAJIT_LIBRARY="$BUILD_DIR/luajit/src/libluajit.a" \
+	-DLUAJIT_INCLUDE_DIR="$ROOT_DIR/repo/luajit/src" \
 	"$ROOT_DIR/repo/love"
 
 make -j$JOBS
