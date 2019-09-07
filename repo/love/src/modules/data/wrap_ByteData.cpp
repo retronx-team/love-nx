@@ -39,7 +39,6 @@ static const luaL_Reg w_ByteData_functions[] =
 int luaopen_bytedata(lua_State *L)
 {
 	luax_register_type(L, &ByteData::type, w_Data_functions, w_ByteData_functions, nullptr);
-	love::data::luax_rundatawrapper(L, ByteData::type);
 	return 0;
 }
 

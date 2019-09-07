@@ -138,7 +138,6 @@ int w_mount(lua_State *L)
 		bool append = luax_optboolean(L, startidx + 1, false);
 
 		luax_pushboolean(L, instance()->mount(data, archive.c_str(), mountpoint, append));
-		return 1;
 	}
 	else if (luax_istype(L, 1, DroppedFile::type))
 	{
@@ -214,10 +213,7 @@ File *luax_getfile(lua_State *L, int idx)
 		file = instance()->newFile(filename);
 	}
 	else
-	{
 		file = luax_checkfile(L, idx);
-		file->retain();
-	}
 
 	return file;
 }
@@ -230,6 +226,7 @@ FileData *luax_getfiledata(lua_State *L, int idx)
 	if (lua_isstring(L, idx) || luax_istype(L, idx, File::type))
 	{
 		file = luax_getfile(L, idx);
+		file->retain();
 	}
 	else if (luax_istype(L, idx, FileData::type))
 	{
@@ -262,6 +259,7 @@ Data *luax_getdata(lua_State *L, int idx)
 	if (lua_isstring(L, idx) || luax_istype(L, idx, File::type))
 	{
 		file = luax_getfile(L, idx);
+		file->retain();
 	}
 	else if (luax_istype(L, idx, Data::type))
 	{
@@ -490,17 +488,24 @@ int w_read(lua_State *L)
 	if (data == nullptr)
 		return luax_ioError(L, "File could not be read.");
 
-	if (ctype == love::data::CONTAINER_DATA)
-		luax_pushtype(L, data);
-	else
-		lua_pushlstring(L, (const char *) data->getData(), data->getSize());
+	int nret = 0;
 
-	lua_pushinteger(L, data->getSize());
+	if (ctype == love::data::CONTAINER_DATA)
+	{
+		luax_pushtype(L, data);
+		nret = 1;
+	}
+	else
+	{
+		lua_pushlstring(L, (const char *) data->getData(), data->getSize());
+		lua_pushinteger(L, data->getSize());
+		nret = 2;
+	}
 
 	// Lua has a copy now, so we can free it.
 	data->release();
 
-	return 2;
+	return nret;
 }
 
 static int w_write_or_append(lua_State *L, File::Mode mode)
@@ -722,7 +727,7 @@ static void replaceAll(std::string &str, const std::string &substr, const std::s
 
 int loader(lua_State *L)
 {
-	std::string modulename = luax_checkstring(L, 1);
+	std::string modulename = luax_tostring(L, 1);
 
 	for (char &c : modulename)
 	{
@@ -763,7 +768,7 @@ static const char *library_extensions[] =
 
 int extloader(lua_State *L)
 {
-	std::string filename = luax_checkstring(L, 1);
+	const char *filename = lua_tostring(L, -1);
 	std::string tokenized_name(filename);
 	std::string tokenized_function(filename);
 

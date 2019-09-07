@@ -1080,7 +1080,7 @@ void ParticleSystem::draw(Graphics *gfx, const Matrix4 &m)
 
 	buffer->unmap();
 
-	vertex::BufferBindings vertexbuffers;
+	vertex::Buffers vertexbuffers;
 	vertexbuffers.set(0, buffer, 0);
 
 	gfx->drawQuads(0, pCount, vertexAttributes, vertexbuffers, texture);

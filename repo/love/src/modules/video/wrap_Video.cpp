@@ -47,7 +47,6 @@ int w_newVideoStream(lua_State *L)
 
 	luax_pushtype(L, stream);
 	stream->release();
-	file->release();
 	return 1;
 }
 

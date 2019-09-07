@@ -510,8 +510,20 @@ extern "C" int luaopen_imagedata(lua_State *L)
 
 	int ret = luax_register_type(L, &ImageData::type, data::w_Data_functions, w_ImageData_functions, nullptr);
 
-	love::data::luax_rundatawrapper(L, ImageData::type);
-	luax_runwrapper(L, imagedata_lua, sizeof(imagedata_lua), "ImageData.lua", ImageData::type, &ffifuncs);
+	luax_gettypemetatable(L, ImageData::type);
+
+	// Load and execute ImageData.lua, sending the metatable and the ffi
+	// functions struct pointer as arguments.
+	if (lua_istable(L, -1))
+	{
+		luaL_loadbuffer(L, imagedata_lua, sizeof(imagedata_lua), "ImageData.lua");
+		lua_pushvalue(L, -2);
+		lua_pushlightuserdata(L, &ffifuncs);
+		lua_call(L, 2, 0);
+	}
+
+	// Pop the metatable.
+	lua_pop(L, 1);
 
 	return ret;
 }

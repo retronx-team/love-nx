@@ -332,7 +332,7 @@ void SpriteBatch::draw(Graphics *gfx, const Matrix4 &m)
 	array_buf->unmap();
 
 	Attributes attributes;
-	BufferBindings buffers;
+	Buffers buffers;
 
 	{
 		buffers.set(0, array_buf, 0);
@@ -374,10 +374,9 @@ void SpriteBatch::draw(Graphics *gfx, const Matrix4 &m)
 			uint16 offset = (uint16) mesh->getAttributeOffset(it.second.index);
 			uint16 stride = (uint16) mesh->getVertexStride();
 
-			attributes.set(attributeindex, format.type, (uint8) format.components, offset, activebuffers);
-			attributes.setBufferLayout(activebuffers, stride);
+			attributes.set(attributeindex, format.type, format.components, offset, stride, activebuffers);
 
-			// TODO: We should reuse buffer bindings with the same buffer+stride+step.
+			// TODO: Ideally we want to reuse buffers with the same stride+step.
 			buffers.set(activebuffers, mesh->vertexBuffer, 0);
 			activebuffers++;
 		}
