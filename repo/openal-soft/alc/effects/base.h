@@ -3,147 +3,160 @@
 
 #include <cstddef>
 
+#include "albyte.h"
 #include "alcmain.h"
 #include "almalloc.h"
 #include "alspan.h"
 #include "atomic.h"
 #include "intrusive_ptr.h"
 
-struct ALeffectslot;
+struct EffectSlot;
+struct BufferStorage;
 
+
+enum class ChorusWaveform {
+    Sinusoid,
+    Triangle
+};
+
+constexpr float EchoMaxDelay{0.207f};
+constexpr float EchoMaxLRDelay{0.404f};
+
+enum class FShifterDirection {
+    Down,
+    Up,
+    Off
+};
+
+enum class ModulatorWaveform {
+    Sinusoid,
+    Sawtooth,
+    Square
+};
+
+enum class VMorpherPhenome {
+    A, E, I, O, U,
+    AA, AE, AH, AO, EH, ER, IH, IY, UH, UW,
+    B, D, F, G, J, K, L, M, N, P, R, S, T, V, Z
+};
+
+enum class VMorpherWaveform {
+    Sinusoid,
+    Triangle,
+    Sawtooth
+};
 
 union EffectProps {
     struct {
         // Shared Reverb Properties
-        ALfloat Density;
-        ALfloat Diffusion;
-        ALfloat Gain;
-        ALfloat GainHF;
-        ALfloat DecayTime;
-        ALfloat DecayHFRatio;
-        ALfloat ReflectionsGain;
-        ALfloat ReflectionsDelay;
-        ALfloat LateReverbGain;
-        ALfloat LateReverbDelay;
-        ALfloat AirAbsorptionGainHF;
-        ALfloat RoomRolloffFactor;
-        ALboolean DecayHFLimit;
+        float Density;
+        float Diffusion;
+        float Gain;
+        float GainHF;
+        float DecayTime;
+        float DecayHFRatio;
+        float ReflectionsGain;
+        float ReflectionsDelay;
+        float LateReverbGain;
+        float LateReverbDelay;
+        float AirAbsorptionGainHF;
+        float RoomRolloffFactor;
+        bool DecayHFLimit;
 
         // Additional EAX Reverb Properties
-        ALfloat GainLF;
-        ALfloat DecayLFRatio;
-        ALfloat ReflectionsPan[3];
-        ALfloat LateReverbPan[3];
-        ALfloat EchoTime;
-        ALfloat EchoDepth;
-        ALfloat ModulationTime;
-        ALfloat ModulationDepth;
-        ALfloat HFReference;
-        ALfloat LFReference;
+        float GainLF;
+        float DecayLFRatio;
+        float ReflectionsPan[3];
+        float LateReverbPan[3];
+        float EchoTime;
+        float EchoDepth;
+        float ModulationTime;
+        float ModulationDepth;
+        float HFReference;
+        float LFReference;
     } Reverb;
 
     struct {
-        ALfloat AttackTime;
-        ALfloat ReleaseTime;
-        ALfloat Resonance;
-        ALfloat PeakGain;
+        float AttackTime;
+        float ReleaseTime;
+        float Resonance;
+        float PeakGain;
     } Autowah;
 
     struct {
-        ALint Waveform;
-        ALint Phase;
-        ALfloat Rate;
-        ALfloat Depth;
-        ALfloat Feedback;
-        ALfloat Delay;
+        ChorusWaveform Waveform;
+        int Phase;
+        float Rate;
+        float Depth;
+        float Feedback;
+        float Delay;
     } Chorus; /* Also Flanger */
 
     struct {
-        ALboolean OnOff;
+        bool OnOff;
     } Compressor;
 
     struct {
-        ALfloat Edge;
-        ALfloat Gain;
-        ALfloat LowpassCutoff;
-        ALfloat EQCenter;
-        ALfloat EQBandwidth;
+        float Edge;
+        float Gain;
+        float LowpassCutoff;
+        float EQCenter;
+        float EQBandwidth;
     } Distortion;
 
     struct {
-        ALfloat Delay;
-        ALfloat LRDelay;
+        float Delay;
+        float LRDelay;
 
-        ALfloat Damping;
-        ALfloat Feedback;
+        float Damping;
+        float Feedback;
 
-        ALfloat Spread;
+        float Spread;
     } Echo;
 
     struct {
-        ALfloat LowCutoff;
-        ALfloat LowGain;
-        ALfloat Mid1Center;
-        ALfloat Mid1Gain;
-        ALfloat Mid1Width;
-        ALfloat Mid2Center;
-        ALfloat Mid2Gain;
-        ALfloat Mid2Width;
-        ALfloat HighCutoff;
-        ALfloat HighGain;
+        float LowCutoff;
+        float LowGain;
+        float Mid1Center;
+        float Mid1Gain;
+        float Mid1Width;
+        float Mid2Center;
+        float Mid2Gain;
+        float Mid2Width;
+        float HighCutoff;
+        float HighGain;
     } Equalizer;
 
     struct {
-        ALfloat Frequency;
-        ALint LeftDirection;
-        ALint RightDirection;
+        float Frequency;
+        FShifterDirection LeftDirection;
+        FShifterDirection RightDirection;
     } Fshifter;
 
     struct {
-        ALfloat Frequency;
-        ALfloat HighPassCutoff;
-        ALint Waveform;
+        float Frequency;
+        float HighPassCutoff;
+        ModulatorWaveform Waveform;
     } Modulator;
 
     struct {
-        ALint CoarseTune;
-        ALint FineTune;
+        int CoarseTune;
+        int FineTune;
     } Pshifter;
 
     struct {
-        ALfloat Rate;
-        ALint PhonemeA;
-        ALint PhonemeB;
-        ALint PhonemeACoarseTuning;
-        ALint PhonemeBCoarseTuning;
-        ALint Waveform;
+        float Rate;
+        VMorpherPhenome PhonemeA;
+        VMorpherPhenome PhonemeB;
+        int PhonemeACoarseTuning;
+        int PhonemeBCoarseTuning;
+        VMorpherWaveform Waveform;
     } Vmorpher;
 
     struct {
-        ALfloat Gain;
+        float Gain;
     } Dedicated;
 };
-
-
-struct EffectVtable {
-    void (*const setParami)(EffectProps *props, ALCcontext *context, ALenum param, ALint val);
-    void (*const setParamiv)(EffectProps *props, ALCcontext *context, ALenum param, const ALint *vals);
-    void (*const setParamf)(EffectProps *props, ALCcontext *context, ALenum param, ALfloat val);
-    void (*const setParamfv)(EffectProps *props, ALCcontext *context, ALenum param, const ALfloat *vals);
-
-    void (*const getParami)(const EffectProps *props, ALCcontext *context, ALenum param, ALint *val);
-    void (*const getParamiv)(const EffectProps *props, ALCcontext *context, ALenum param, ALint *vals);
-    void (*const getParamf)(const EffectProps *props, ALCcontext *context, ALenum param, ALfloat *val);
-    void (*const getParamfv)(const EffectProps *props, ALCcontext *context, ALenum param, ALfloat *vals);
-};
-
-#define DEFINE_ALEFFECT_VTABLE(T)           \
-const EffectVtable T##_vtable = {           \
-    T##_setParami, T##_setParamiv,          \
-    T##_setParamf, T##_setParamfv,          \
-    T##_getParami, T##_getParamiv,          \
-    T##_getParamf, T##_getParamfv,          \
-}
 
 
 struct EffectTarget {
@@ -152,23 +165,28 @@ struct EffectTarget {
 };
 
 struct EffectState : public al::intrusive_ref<EffectState> {
+    struct Buffer {
+        const BufferStorage *storage;
+        al::span<const al::byte> samples;
+    };
+
     al::span<FloatBufferLine> mOutTarget;
 
 
     virtual ~EffectState() = default;
 
-    virtual ALboolean deviceUpdate(const ALCdevice *device) = 0;
-    virtual void update(const ALCcontext *context, const ALeffectslot *slot, const EffectProps *props, const EffectTarget target) = 0;
-    virtual void process(const size_t samplesToDo, const al::span<const FloatBufferLine> samplesIn, const al::span<FloatBufferLine> samplesOut) = 0;
+    virtual void deviceUpdate(const ALCdevice *device, const Buffer &buffer) = 0;
+    virtual void update(const ALCcontext *context, const EffectSlot *slot,
+        const EffectProps *props, const EffectTarget target) = 0;
+    virtual void process(const size_t samplesToDo, const al::span<const FloatBufferLine> samplesIn,
+        const al::span<FloatBufferLine> samplesOut) = 0;
 };
 
 
 struct EffectStateFactory {
-    virtual ~EffectStateFactory() { }
+    virtual ~EffectStateFactory() = default;
 
-    virtual EffectState *create() = 0;
-    virtual EffectProps getDefaultProps() const noexcept = 0;
-    virtual const EffectVtable *getEffectVtable() const noexcept = 0;
+    virtual al::intrusive_ptr<EffectState> create() = 0;
 };
 
 
@@ -189,5 +207,6 @@ EffectStateFactory* VmorpherStateFactory_getFactory(void);
 
 EffectStateFactory *DedicatedStateFactory_getFactory(void);
 
+EffectStateFactory *ConvolutionStateFactory_getFactory(void);
 
 #endif /* EFFECTS_BASE_H */

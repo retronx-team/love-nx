@@ -11,15 +11,16 @@
 #include <array>
 
 #include "AL/alc.h"
+#include "alstring.h"
 #include "router.h"
 
 
 #define DECL(x) { #x, reinterpret_cast<void*>(x) }
 struct FuncExportEntry {
-    const ALCchar *funcName;
-    ALCvoid *address;
+    const char *funcName;
+    void *address;
 };
-static const std::array<FuncExportEntry,95> alcFunctions{{
+static const std::array<FuncExportEntry,128> alcFunctions{{
     DECL(alcCreateContext),
     DECL(alcMakeContextCurrent),
     DECL(alcProcessContext),
@@ -117,6 +118,40 @@ static const std::array<FuncExportEntry,95> alcFunctions{{
     DECL(alDopplerVelocity),
     DECL(alSpeedOfSound),
     DECL(alDistanceModel),
+
+    DECL(alGenFilters),
+    DECL(alDeleteFilters),
+    DECL(alIsFilter),
+    DECL(alFilterf),
+    DECL(alFilterfv),
+    DECL(alFilteri),
+    DECL(alFilteriv),
+    DECL(alGetFilterf),
+    DECL(alGetFilterfv),
+    DECL(alGetFilteri),
+    DECL(alGetFilteriv),
+    DECL(alGenEffects),
+    DECL(alDeleteEffects),
+    DECL(alIsEffect),
+    DECL(alEffectf),
+    DECL(alEffectfv),
+    DECL(alEffecti),
+    DECL(alEffectiv),
+    DECL(alGetEffectf),
+    DECL(alGetEffectfv),
+    DECL(alGetEffecti),
+    DECL(alGetEffectiv),
+    DECL(alGenAuxiliaryEffectSlots),
+    DECL(alDeleteAuxiliaryEffectSlots),
+    DECL(alIsAuxiliaryEffectSlot),
+    DECL(alAuxiliaryEffectSlotf),
+    DECL(alAuxiliaryEffectSlotfv),
+    DECL(alAuxiliaryEffectSloti),
+    DECL(alAuxiliaryEffectSlotiv),
+    DECL(alGetAuxiliaryEffectSlotf),
+    DECL(alGetAuxiliaryEffectSlotfv),
+    DECL(alGetAuxiliaryEffectSloti),
+    DECL(alGetAuxiliaryEffectSlotiv),
 }};
 #undef DECL
 
@@ -248,7 +283,7 @@ static const ALCint alcMajorVersion = 1;
 static const ALCint alcMinorVersion = 1;
 
 
-static std::mutex EnumerationLock;
+static std::recursive_mutex EnumerationLock;
 static std::mutex ContextSwitchLock;
 
 static std::atomic<ALCenum> LastError{ALC_NO_ERROR};
@@ -324,7 +359,8 @@ ALC_API ALCdevice* ALC_APIENTRY alcOpenDevice(const ALCchar *devicename)
         devicename = nullptr;
     if(devicename)
     {
-        { std::lock_guard<std::mutex> _{EnumerationLock};
+        {
+            std::lock_guard<std::recursive_mutex> _{EnumerationLock};
             if(DevicesList.Names.empty())
                 (void)alcGetString(nullptr, ALC_DEVICE_SPECIFIER);
             idx = GetDriverIndexForName(&DevicesList, devicename);
@@ -539,7 +575,7 @@ ALC_API ALCboolean ALC_APIENTRY alcIsExtensionPresent(ALCdevice *device, const A
     ptr = alcExtensionList;
     while(ptr && *ptr)
     {
-        if(strncasecmp(ptr, extname, len) == 0 && (ptr[len] == '\0' || isspace(ptr[len])))
+        if(al::strncasecmp(ptr, extname, len) == 0 && (ptr[len] == '\0' || isspace(ptr[len])))
             return ALC_TRUE;
         if((ptr=strchr(ptr, ' ')) != nullptr)
         {
@@ -564,11 +600,11 @@ ALC_API void* ALC_APIENTRY alcGetProcAddress(ALCdevice *device, const ALCchar *f
         return DriverList[idx].alcGetProcAddress(device, funcname);
     }
 
-    auto entry = std::find_if(alcFunctions.cbegin(), alcFunctions.cend(),
+    auto iter = std::find_if(alcFunctions.cbegin(), alcFunctions.cend(),
         [funcname](const FuncExportEntry &entry) -> bool
         { return strcmp(funcname, entry.funcName) == 0; }
     );
-    return (entry != alcFunctions.cend()) ? entry->address : nullptr;
+    return (iter != alcFunctions.cend()) ? iter->address : nullptr;
 }
 
 ALC_API ALCenum ALC_APIENTRY alcGetEnumValue(ALCdevice *device, const ALCchar *enumname)
@@ -584,11 +620,11 @@ ALC_API ALCenum ALC_APIENTRY alcGetEnumValue(ALCdevice *device, const ALCchar *e
         return DriverList[idx].alcGetEnumValue(device, enumname);
     }
 
-    auto entry = std::find_if(alcEnumerations.cbegin(), alcEnumerations.cend(),
+    auto iter = std::find_if(alcEnumerations.cbegin(), alcEnumerations.cend(),
         [enumname](const EnumExportEntry &entry) -> bool
         { return strcmp(enumname, entry.enumName) == 0; }
     );
-    return (entry != alcEnumerations.cend()) ? entry->value : 0;
+    return (iter != alcEnumerations.cend()) ? iter->value : 0;
 }
 
 ALC_API const ALCchar* ALC_APIENTRY alcGetString(ALCdevice *device, ALCenum param)
@@ -622,30 +658,31 @@ ALC_API const ALCchar* ALC_APIENTRY alcGetString(ALCdevice *device, ALCenum para
         return alcExtensionList;
 
     case ALC_DEVICE_SPECIFIER:
-    { std::lock_guard<std::mutex> _{EnumerationLock};
+    {
+        std::lock_guard<std::recursive_mutex> _{EnumerationLock};
         DevicesList.clear();
-        ALint idx = 0;
+        ALint idx{0};
         for(const auto &drv : DriverList)
         {
             /* Only enumerate names from drivers that support it. */
-            if(drv.ALCVer >= MAKE_ALC_VER(1, 1) ||
-               drv.alcIsExtensionPresent(nullptr, "ALC_ENUMERATION_EXT"))
+            if(drv.ALCVer >= MAKE_ALC_VER(1, 1)
+                || drv.alcIsExtensionPresent(nullptr, "ALC_ENUMERATION_EXT"))
                 AppendDeviceList(&DevicesList,
-                    drv.alcGetString(nullptr, ALC_DEVICE_SPECIFIER), idx
-                );
-            idx++;
+                    drv.alcGetString(nullptr, ALC_DEVICE_SPECIFIER), idx);
+            ++idx;
         }
         /* Ensure the list is double-null termianted. */
         if(DevicesList.Names.empty())
-            DevicesList.Names.emplace_back(0);
-        DevicesList.Names.emplace_back(0);
+            DevicesList.Names.emplace_back('\0');
+        DevicesList.Names.emplace_back('\0');
         return DevicesList.Names.data();
     }
 
     case ALC_ALL_DEVICES_SPECIFIER:
-    { std::lock_guard<std::mutex> _{EnumerationLock};
+    {
+        std::lock_guard<std::recursive_mutex> _{EnumerationLock};
         AllDevicesList.clear();
-        ALint idx = 0;
+        ALint idx{0};
         for(const auto &drv : DriverList)
         {
             /* If the driver doesn't support ALC_ENUMERATE_ALL_EXT, substitute
@@ -653,78 +690,75 @@ ALC_API const ALCchar* ALC_APIENTRY alcGetString(ALCdevice *device, ALCenum para
              */
             if(drv.alcIsExtensionPresent(nullptr, "ALC_ENUMERATE_ALL_EXT"))
                 AppendDeviceList(&AllDevicesList,
-                    drv.alcGetString(nullptr, ALC_ALL_DEVICES_SPECIFIER), idx
-                );
-            else if(drv.ALCVer >= MAKE_ALC_VER(1, 1) ||
-                    drv.alcIsExtensionPresent(nullptr, "ALC_ENUMERATION_EXT"))
+                    drv.alcGetString(nullptr, ALC_ALL_DEVICES_SPECIFIER), idx);
+            else if(drv.ALCVer >= MAKE_ALC_VER(1, 1)
+                || drv.alcIsExtensionPresent(nullptr, "ALC_ENUMERATION_EXT"))
                 AppendDeviceList(&AllDevicesList,
-                    drv.alcGetString(nullptr, ALC_DEVICE_SPECIFIER), idx
-                );
+                    drv.alcGetString(nullptr, ALC_DEVICE_SPECIFIER), idx);
             ++idx;
         }
         /* Ensure the list is double-null termianted. */
         if(AllDevicesList.Names.empty())
-            AllDevicesList.Names.emplace_back(0);
-        AllDevicesList.Names.emplace_back(0);
+            AllDevicesList.Names.emplace_back('\0');
+        AllDevicesList.Names.emplace_back('\0');
         return AllDevicesList.Names.data();
     }
 
     case ALC_CAPTURE_DEVICE_SPECIFIER:
-    { std::lock_guard<std::mutex> _{EnumerationLock};
+    {
+        std::lock_guard<std::recursive_mutex> _{EnumerationLock};
         CaptureDevicesList.clear();
-        ALint idx = 0;
+        ALint idx{0};
         for(const auto &drv : DriverList)
         {
-            if(drv.ALCVer >= MAKE_ALC_VER(1, 1) ||
-               drv.alcIsExtensionPresent(nullptr, "ALC_EXT_CAPTURE"))
+            if(drv.ALCVer >= MAKE_ALC_VER(1, 1)
+                || drv.alcIsExtensionPresent(nullptr, "ALC_EXT_CAPTURE"))
                 AppendDeviceList(&CaptureDevicesList,
-                    drv.alcGetString(nullptr, ALC_CAPTURE_DEVICE_SPECIFIER), idx
-                );
+                    drv.alcGetString(nullptr, ALC_CAPTURE_DEVICE_SPECIFIER), idx);
             ++idx;
         }
         /* Ensure the list is double-null termianted. */
         if(CaptureDevicesList.Names.empty())
-            CaptureDevicesList.Names.emplace_back(0);
-        CaptureDevicesList.Names.emplace_back(0);
+            CaptureDevicesList.Names.emplace_back('\0');
+        CaptureDevicesList.Names.emplace_back('\0');
         return CaptureDevicesList.Names.data();
     }
 
     case ALC_DEFAULT_DEVICE_SPECIFIER:
     {
-        auto drv = std::find_if(DriverList.cbegin(), DriverList.cend(),
+        auto iter = std::find_if(DriverList.cbegin(), DriverList.cend(),
             [](const DriverIface &drv) -> bool
             {
-                return drv.ALCVer >= MAKE_ALC_VER(1, 1) ||
-                       drv.alcIsExtensionPresent(nullptr, "ALC_ENUMERATION_EXT");
+                return drv.ALCVer >= MAKE_ALC_VER(1, 1)
+                    || drv.alcIsExtensionPresent(nullptr, "ALC_ENUMERATION_EXT");
             }
         );
-        if(drv != DriverList.cend())
-            return drv->alcGetString(nullptr, ALC_DEFAULT_DEVICE_SPECIFIER);
+        if(iter != DriverList.cend())
+            return iter->alcGetString(nullptr, ALC_DEFAULT_DEVICE_SPECIFIER);
         return "";
     }
 
     case ALC_DEFAULT_ALL_DEVICES_SPECIFIER:
     {
-        auto drv = std::find_if(DriverList.cbegin(), DriverList.cend(),
+        auto iter = std::find_if(DriverList.cbegin(), DriverList.cend(),
             [](const DriverIface &drv) -> bool
-            { return drv.alcIsExtensionPresent(nullptr, "ALC_ENUMERATE_ALL_EXT") != ALC_FALSE; }
-        );
-        if(drv != DriverList.cend())
-            return drv->alcGetString(nullptr, ALC_DEFAULT_ALL_DEVICES_SPECIFIER);
+            { return drv.alcIsExtensionPresent(nullptr, "ALC_ENUMERATE_ALL_EXT") != ALC_FALSE; });
+        if(iter != DriverList.cend())
+            return iter->alcGetString(nullptr, ALC_DEFAULT_ALL_DEVICES_SPECIFIER);
         return "";
     }
 
     case ALC_CAPTURE_DEFAULT_DEVICE_SPECIFIER:
     {
-        auto drv = std::find_if(DriverList.cbegin(), DriverList.cend(),
+        auto iter = std::find_if(DriverList.cbegin(), DriverList.cend(),
             [](const DriverIface &drv) -> bool
             {
-                return drv.ALCVer >= MAKE_ALC_VER(1, 1) ||
-                       drv.alcIsExtensionPresent(nullptr, "ALC_EXT_CAPTURE");
+                return drv.ALCVer >= MAKE_ALC_VER(1, 1)
+                    || drv.alcIsExtensionPresent(nullptr, "ALC_EXT_CAPTURE");
             }
         );
-        if(drv != DriverList.cend())
-            return drv->alcGetString(nullptr, ALC_CAPTURE_DEFAULT_DEVICE_SPECIFIER);
+        if(iter != DriverList.cend())
+            return iter->alcGetString(nullptr, ALC_CAPTURE_DEFAULT_DEVICE_SPECIFIER);
         return "";
     }
 
@@ -799,7 +833,8 @@ ALC_API ALCdevice* ALC_APIENTRY alcCaptureOpenDevice(const ALCchar *devicename, 
         devicename = nullptr;
     if(devicename)
     {
-        { std::lock_guard<std::mutex> _{EnumerationLock};
+        {
+            std::lock_guard<std::recursive_mutex> _{EnumerationLock};
             if(CaptureDevicesList.Names.empty())
                 (void)alcGetString(nullptr, ALC_CAPTURE_DEVICE_SPECIFIER);
             idx = GetDriverIndexForName(&CaptureDevicesList, devicename);
@@ -812,21 +847,17 @@ ALC_API ALCdevice* ALC_APIENTRY alcCaptureOpenDevice(const ALCchar *devicename, 
             return nullptr;
         }
         TRACE("Found driver %d for name \"%s\"\n", idx, devicename);
-        device = DriverList[idx].alcCaptureOpenDevice(
-            devicename, frequency, format, buffersize
-        );
+        device = DriverList[idx].alcCaptureOpenDevice(devicename, frequency, format, buffersize);
     }
     else
     {
         for(const auto &drv : DriverList)
         {
-            if(drv.ALCVer >= MAKE_ALC_VER(1, 1) ||
-               drv.alcIsExtensionPresent(nullptr, "ALC_EXT_CAPTURE"))
+            if(drv.ALCVer >= MAKE_ALC_VER(1, 1)
+                || drv.alcIsExtensionPresent(nullptr, "ALC_EXT_CAPTURE"))
             {
                 TRACE("Using default capture device from driver %d\n", idx);
-                device = drv.alcCaptureOpenDevice(
-                    nullptr, frequency, format, buffersize
-                );
+                device = drv.alcCaptureOpenDevice(nullptr, frequency, format, buffersize);
                 break;
             }
             ++idx;

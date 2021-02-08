@@ -8,37 +8,42 @@
 #include <cstddef>
 #include <utility>
 
+#include "albit.h"
+#include "alnumeric.h"
 #include "math_defs.h"
 
 
 void complex_fft(const al::span<std::complex<double>> buffer, const double sign)
 {
     const size_t fftsize{buffer.size()};
-    /* Bit-reversal permutation applied to a sequence of FFTSize items */
-    for(size_t i{1u};i < fftsize-1;i++)
-    {
-        size_t j{0u};
-        for(size_t mask{1u};mask < fftsize;mask <<= 1)
-        {
-            if((i&mask) != 0)
-                j++;
-            j <<= 1;
-        }
-        j >>= 1;
+    /* Get the number of bits used for indexing. Simplifies bit-reversal and
+     * the main loop count.
+     */
+    const size_t log2_size{static_cast<size_t>(al::countr_zero(fftsize))};
 
-        if(i < j)
-            std::swap(buffer[i], buffer[j]);
+    /* Bit-reversal permutation applied to a sequence of fftsize items. */
+    for(size_t idx{1u};idx < fftsize-1;++idx)
+    {
+        size_t revidx{0u}, imask{idx};
+        for(size_t i{0};i < log2_size;++i)
+        {
+            revidx = (revidx<<1) | (imask&1);
+            imask >>= 1;
+        }
+
+        if(idx < revidx)
+            std::swap(buffer[idx], buffer[revidx]);
     }
 
-    /* Iterative form of DanielsonLanczos lemma */
-    size_t step{2u};
-    for(size_t i{1u};i < fftsize;i<<=1, step<<=1)
+    /* Iterative form of Danielson-Lanczos lemma */
+    size_t step2{1u};
+    for(size_t i{0};i < log2_size;++i)
     {
-        const size_t step2{step >> 1};
-        double arg{al::MathDefs<double>::Pi() / step2};
+        const double arg{al::MathDefs<double>::Pi() / static_cast<double>(step2)};
 
-        std::complex<double> w{std::cos(arg), std::sin(arg)*sign};
+        const std::complex<double> w{std::cos(arg), std::sin(arg)*sign};
         std::complex<double> u{1.0, 0.0};
+        const size_t step{step2 << 1};
         for(size_t j{0};j < step2;j++)
         {
             for(size_t k{j};k < fftsize;k+=step)
@@ -50,14 +55,14 @@ void complex_fft(const al::span<std::complex<double>> buffer, const double sign)
 
             u *= w;
         }
+
+        step2 <<= 1;
     }
 }
 
 void complex_hilbert(const al::span<std::complex<double>> buffer)
 {
-    std::for_each(buffer.begin(), buffer.end(), [](std::complex<double> &c) { c.imag(0.0); });
-
-    complex_fft(buffer, 1.0);
+    inverse_fft(buffer);
 
     const double inverse_size = 1.0/static_cast<double>(buffer.size());
     auto bufiter = buffer.begin();
@@ -71,5 +76,5 @@ void complex_hilbert(const al::span<std::complex<double>> buffer)
 
     std::fill(bufiter, buffer.end(), std::complex<double>{});
 
-    complex_fft(buffer, -1.0);
+    forward_fft(buffer);
 }

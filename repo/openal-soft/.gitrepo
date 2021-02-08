@@ -6,7 +6,7 @@
 [subrepo]
 	remote = https://github.com/kcat/openal-soft
 	branch = master
-	commit = ef2769af03825f278b855858681e4cbe55c0734b
+	commit = 72c4dd4d10659fb0e3fa973e68f399c6b34d4b99
 	parent = f15c36b7291a8531f662ba52c2cf8d1e6ca38e38
 	method = merge
-	cmdver = 0.4.0
+	cmdver = 0.4.3

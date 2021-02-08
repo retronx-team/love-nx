@@ -4,71 +4,56 @@
 #include <cstddef>
 #include <memory>
 
-#include "AL/al.h"
-
-#include "alcmain.h"
 #include "almalloc.h"
-#include "alnumeric.h"
-#include "alu.h"
-#include "devformat.h"
+#include "core/devformat.h"
+#include "core/mixer/defs.h"
+
+using uint = unsigned int;
 
 
 struct SampleConverter {
     DevFmtType mSrcType{};
     DevFmtType mDstType{};
-    ALsizei mSrcTypeSize{};
-    ALsizei mDstTypeSize{};
+    uint mSrcTypeSize{};
+    uint mDstTypeSize{};
 
-    ALint mSrcPrepCount{};
+    int mSrcPrepCount{};
 
-    ALsizei mFracOffset{};
-    ALsizei mIncrement{};
+    uint mFracOffset{};
+    uint mIncrement{};
     InterpState mState{};
     ResamplerFunc mResample{};
 
-    alignas(16) ALfloat mSrcSamples[BUFFERSIZE]{};
-    alignas(16) ALfloat mDstSamples[BUFFERSIZE]{};
+    alignas(16) float mSrcSamples[BufferLineSize]{};
+    alignas(16) float mDstSamples[BufferLineSize]{};
 
     struct ChanSamples {
-        alignas(16) ALfloat PrevSamples[MAX_RESAMPLE_PADDING*2];
+        alignas(16) float PrevSamples[MaxResamplerPadding];
     };
     al::FlexArray<ChanSamples> mChan;
 
     SampleConverter(size_t numchans) : mChan{numchans} { }
 
-    ALuint convert(const ALvoid **src, ALuint *srcframes, ALvoid *dst, ALuint dstframes);
-    ALuint availableOut(ALuint srcframes) const;
+    uint convert(const void **src, uint *srcframes, void *dst, uint dstframes);
+    uint availableOut(uint srcframes) const;
 
-    static constexpr size_t Sizeof(size_t length) noexcept
-    {
-        return maxz(sizeof(SampleConverter),
-            al::FlexArray<ChanSamples>::Sizeof(length, offsetof(SampleConverter, mChan)));
-    }
-
-    DEF_PLACE_NEWDEL()
+    DEF_FAM_NEWDEL(SampleConverter, mChan)
 };
 using SampleConverterPtr = std::unique_ptr<SampleConverter>;
 
-SampleConverterPtr CreateSampleConverter(DevFmtType srcType, DevFmtType dstType, ALsizei numchans,
-    ALsizei srcRate, ALsizei dstRate, Resampler resampler);
+SampleConverterPtr CreateSampleConverter(DevFmtType srcType, DevFmtType dstType, size_t numchans,
+    uint srcRate, uint dstRate, Resampler resampler);
 
 
 struct ChannelConverter {
-    DevFmtType mSrcType;
-    DevFmtChannels mSrcChans;
-    DevFmtChannels mDstChans;
+    DevFmtType mSrcType{};
+    uint mSrcStep{};
+    uint mChanMask{};
+    DevFmtChannels mDstChans{};
 
-    ChannelConverter(DevFmtType srctype, DevFmtChannels srcchans, DevFmtChannels dstchans)
-      : mSrcType(srctype), mSrcChans(srcchans), mDstChans(dstchans)
-    { }
+    bool is_active() const noexcept { return mChanMask != 0; }
 
-    void convert(const ALvoid *src, ALfloat *dst, ALuint frames) const;
-
-    DEF_NEWDEL(ChannelConverter)
+    void convert(const void *src, float *dst, uint frames) const;
 };
-using ChannelConverterPtr = std::unique_ptr<ChannelConverter>;
-
-ChannelConverterPtr CreateChannelConverter(DevFmtType srcType, DevFmtChannels srcChans,
-    DevFmtChannels dstChans);
 
 #endif /* CONVERTER_H */

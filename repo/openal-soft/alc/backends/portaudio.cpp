@@ -29,6 +29,7 @@
 #include "alcmain.h"
 #include "alu.h"
 #include "alconfig.h"
+#include "core/logging.h"
 #include "dynload.h"
 #include "ringbuffer.h"
 
@@ -37,7 +38,7 @@
 
 namespace {
 
-constexpr ALCchar pa_device[] = "PortAudio Default";
+constexpr char pa_device[] = "PortAudio Default";
 
 
 #ifdef HAVE_DYNLOAD
@@ -74,20 +75,24 @@ struct PortPlayback final : public BackendBase {
     PortPlayback(ALCdevice *device) noexcept : BackendBase{device} { }
     ~PortPlayback() override;
 
+    int writeCallback(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer,
+        const PaStreamCallbackTimeInfo *timeInfo, const PaStreamCallbackFlags statusFlags) noexcept;
     static int writeCallbackC(const void *inputBuffer, void *outputBuffer,
         unsigned long framesPerBuffer, const PaStreamCallbackTimeInfo *timeInfo,
-        const PaStreamCallbackFlags statusFlags, void *userData);
-    int writeCallback(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer,
-        const PaStreamCallbackTimeInfo *timeInfo, const PaStreamCallbackFlags statusFlags);
+        const PaStreamCallbackFlags statusFlags, void *userData) noexcept
+    {
+        return static_cast<PortPlayback*>(userData)->writeCallback(inputBuffer, outputBuffer,
+            framesPerBuffer, timeInfo, statusFlags);
+    }
 
-    ALCenum open(const ALCchar *name) override;
-    ALCboolean reset() override;
-    ALCboolean start() override;
+    void open(const char *name) override;
+    bool reset() override;
+    void start() override;
     void stop() override;
 
     PaStream *mStream{nullptr};
     PaStreamParameters mParams{};
-    ALuint mUpdateSize{0u};
+    uint mUpdateSize{0u};
 
     DEF_NEWDEL(PortPlayback)
 };
@@ -101,31 +106,22 @@ PortPlayback::~PortPlayback()
 }
 
 
-int PortPlayback::writeCallbackC(const void *inputBuffer, void *outputBuffer,
-    unsigned long framesPerBuffer, const PaStreamCallbackTimeInfo *timeInfo,
-    const PaStreamCallbackFlags statusFlags, void *userData)
+int PortPlayback::writeCallback(const void*, void *outputBuffer, unsigned long framesPerBuffer,
+    const PaStreamCallbackTimeInfo*, const PaStreamCallbackFlags) noexcept
 {
-    return static_cast<PortPlayback*>(userData)->writeCallback(inputBuffer, outputBuffer,
-        framesPerBuffer, timeInfo, statusFlags);
-}
-
-int PortPlayback::writeCallback(const void*, void *outputBuffer,
-    unsigned long framesPerBuffer, const PaStreamCallbackTimeInfo*,
-    const PaStreamCallbackFlags)
-{
-    lock();
-    aluMixData(mDevice, outputBuffer, framesPerBuffer);
-    unlock();
+    mDevice->renderSamples(outputBuffer, static_cast<uint>(framesPerBuffer),
+        static_cast<uint>(mParams.channelCount));
     return 0;
 }
 
 
-ALCenum PortPlayback::open(const ALCchar *name)
+void PortPlayback::open(const char *name)
 {
     if(!name)
         name = pa_device;
     else if(strcmp(name, pa_device) != 0)
-        return ALC_INVALID_VALUE;
+        throw al::backend_exception{al::backend_error::NoDevice, "Device name \"%s\" not found",
+            name};
 
     mUpdateSize = mDevice->UpdateSize;
 
@@ -139,25 +135,25 @@ ALCenum PortPlayback::open(const ALCchar *name)
 
     switch(mDevice->FmtType)
     {
-        case DevFmtByte:
-            mParams.sampleFormat = paInt8;
-            break;
-        case DevFmtUByte:
-            mParams.sampleFormat = paUInt8;
-            break;
-        case DevFmtUShort:
-            /* fall-through */
-        case DevFmtShort:
-            mParams.sampleFormat = paInt16;
-            break;
-        case DevFmtUInt:
-            /* fall-through */
-        case DevFmtInt:
-            mParams.sampleFormat = paInt32;
-            break;
-        case DevFmtFloat:
-            mParams.sampleFormat = paFloat32;
-            break;
+    case DevFmtByte:
+        mParams.sampleFormat = paInt8;
+        break;
+    case DevFmtUByte:
+        mParams.sampleFormat = paUInt8;
+        break;
+    case DevFmtUShort:
+        /* fall-through */
+    case DevFmtShort:
+        mParams.sampleFormat = paInt16;
+        break;
+    case DevFmtUInt:
+        /* fall-through */
+    case DevFmtInt:
+        mParams.sampleFormat = paInt32;
+        break;
+    case DevFmtFloat:
+        mParams.sampleFormat = paFloat32;
+        break;
     }
 
 retry_open:
@@ -170,19 +166,17 @@ retry_open:
             mParams.sampleFormat = paInt16;
             goto retry_open;
         }
-        ERR("Pa_OpenStream() returned an error: %s\n", Pa_GetErrorText(err));
-        return ALC_INVALID_VALUE;
+        throw al::backend_exception{al::backend_error::NoDevice, "Failed to open stream: %s",
+            Pa_GetErrorText(err)};
     }
 
     mDevice->DeviceName = name;
-    return ALC_NO_ERROR;
-
 }
 
-ALCboolean PortPlayback::reset()
+bool PortPlayback::reset()
 {
     const PaStreamInfo *streamInfo{Pa_GetStreamInfo(mStream)};
-    mDevice->Frequency = streamInfo->sampleRate;
+    mDevice->Frequency = static_cast<uint>(streamInfo->sampleRate);
     mDevice->UpdateSize = mUpdateSize;
 
     if(mParams.sampleFormat == paInt8)
@@ -198,7 +192,7 @@ ALCboolean PortPlayback::reset()
     else
     {
         ERR("Unexpected sample format: 0x%lx\n", mParams.sampleFormat);
-        return ALC_FALSE;
+        return false;
     }
 
     if(mParams.channelCount == 2)
@@ -208,22 +202,19 @@ ALCboolean PortPlayback::reset()
     else
     {
         ERR("Unexpected channel count: %u\n", mParams.channelCount);
-        return ALC_FALSE;
+        return false;
     }
-    SetDefaultChannelOrder(mDevice);
+    setDefaultChannelOrder();
 
-    return ALC_TRUE;
+    return true;
 }
 
-ALCboolean PortPlayback::start()
+void PortPlayback::start()
 {
-    PaError err{Pa_StartStream(mStream)};
-    if(err != paNoError)
-    {
-        ERR("Pa_StartStream() returned an error: %s\n", Pa_GetErrorText(err));
-        return ALC_FALSE;
-    }
-    return ALC_TRUE;
+    const PaError err{Pa_StartStream(mStream)};
+    if(err == paNoError)
+        throw al::backend_exception{al::backend_error::DeviceError, "Failed to start playback: %s",
+            Pa_GetErrorText(err)};
 }
 
 void PortPlayback::stop()
@@ -238,17 +229,21 @@ struct PortCapture final : public BackendBase {
     PortCapture(ALCdevice *device) noexcept : BackendBase{device} { }
     ~PortCapture() override;
 
+    int readCallback(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer,
+        const PaStreamCallbackTimeInfo *timeInfo, const PaStreamCallbackFlags statusFlags) noexcept;
     static int readCallbackC(const void *inputBuffer, void *outputBuffer,
         unsigned long framesPerBuffer, const PaStreamCallbackTimeInfo *timeInfo,
-        const PaStreamCallbackFlags statusFlags, void *userData);
-    int readCallback(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer,
-        const PaStreamCallbackTimeInfo *timeInfo, const PaStreamCallbackFlags statusFlags);
+        const PaStreamCallbackFlags statusFlags, void *userData) noexcept
+    {
+        return static_cast<PortCapture*>(userData)->readCallback(inputBuffer, outputBuffer,
+            framesPerBuffer, timeInfo, statusFlags);
+    }
 
-    ALCenum open(const ALCchar *name) override;
-    ALCboolean start() override;
+    void open(const char *name) override;
+    void start() override;
     void stop() override;
-    ALCenum captureSamples(ALCvoid *buffer, ALCuint samples) override;
-    ALCuint availableSamples() override;
+    void captureSamples(al::byte *buffer, uint samples) override;
+    uint availableSamples() override;
 
     PaStream *mStream{nullptr};
     PaStreamParameters mParams;
@@ -267,36 +262,27 @@ PortCapture::~PortCapture()
 }
 
 
-int PortCapture::readCallbackC(const void *inputBuffer, void *outputBuffer,
-    unsigned long framesPerBuffer, const PaStreamCallbackTimeInfo *timeInfo,
-    const PaStreamCallbackFlags statusFlags, void* userData)
-{
-    return static_cast<PortCapture*>(userData)->readCallback(inputBuffer, outputBuffer,
-        framesPerBuffer, timeInfo, statusFlags);
-}
-
-int PortCapture::readCallback(const void *inputBuffer, void*,
-    unsigned long framesPerBuffer, const PaStreamCallbackTimeInfo*,
-    const PaStreamCallbackFlags)
+int PortCapture::readCallback(const void *inputBuffer, void*, unsigned long framesPerBuffer,
+    const PaStreamCallbackTimeInfo*, const PaStreamCallbackFlags) noexcept
 {
     mRing->write(inputBuffer, framesPerBuffer);
     return 0;
 }
 
 
-ALCenum PortCapture::open(const ALCchar *name)
+void PortCapture::open(const char *name)
 {
     if(!name)
         name = pa_device;
     else if(strcmp(name, pa_device) != 0)
-        return ALC_INVALID_VALUE;
+        throw al::backend_exception{al::backend_error::NoDevice, "Device name \"%s\" not found",
+            name};
 
-    ALuint samples{mDevice->BufferSize};
+    uint samples{mDevice->BufferSize};
     samples = maxu(samples, 100 * mDevice->Frequency / 1000);
-    ALsizei frame_size{mDevice->frameSizeFromFmt()};
+    uint frame_size{mDevice->frameSizeFromFmt()};
 
-    mRing = CreateRingBuffer(samples, frame_size, false);
-    if(!mRing) return ALC_INVALID_VALUE;
+    mRing = RingBuffer::Create(samples, frame_size, false);
 
     auto devidopt = ConfigValueInt(nullptr, "port", "capture");
     if(devidopt && *devidopt >= 0) mParams.device = *devidopt;
@@ -306,50 +292,44 @@ ALCenum PortCapture::open(const ALCchar *name)
 
     switch(mDevice->FmtType)
     {
-        case DevFmtByte:
-            mParams.sampleFormat = paInt8;
-            break;
-        case DevFmtUByte:
-            mParams.sampleFormat = paUInt8;
-            break;
-        case DevFmtShort:
-            mParams.sampleFormat = paInt16;
-            break;
-        case DevFmtInt:
-            mParams.sampleFormat = paInt32;
-            break;
-        case DevFmtFloat:
-            mParams.sampleFormat = paFloat32;
-            break;
-        case DevFmtUInt:
-        case DevFmtUShort:
-            ERR("%s samples not supported\n", DevFmtTypeString(mDevice->FmtType));
-            return ALC_INVALID_VALUE;
+    case DevFmtByte:
+        mParams.sampleFormat = paInt8;
+        break;
+    case DevFmtUByte:
+        mParams.sampleFormat = paUInt8;
+        break;
+    case DevFmtShort:
+        mParams.sampleFormat = paInt16;
+        break;
+    case DevFmtInt:
+        mParams.sampleFormat = paInt32;
+        break;
+    case DevFmtFloat:
+        mParams.sampleFormat = paFloat32;
+        break;
+    case DevFmtUInt:
+    case DevFmtUShort:
+        throw al::backend_exception{al::backend_error::DeviceError, "%s samples not supported",
+            DevFmtTypeString(mDevice->FmtType)};
     }
-    mParams.channelCount = mDevice->channelsFromFmt();
+    mParams.channelCount = static_cast<int>(mDevice->channelsFromFmt());
 
     PaError err{Pa_OpenStream(&mStream, &mParams, nullptr, mDevice->Frequency,
         paFramesPerBufferUnspecified, paNoFlag, &PortCapture::readCallbackC, this)};
     if(err != paNoError)
-    {
-        ERR("Pa_OpenStream() returned an error: %s\n", Pa_GetErrorText(err));
-        return ALC_INVALID_VALUE;
-    }
+        throw al::backend_exception{al::backend_error::NoDevice, "Failed to open stream: %s",
+            Pa_GetErrorText(err)};
 
     mDevice->DeviceName = name;
-    return ALC_NO_ERROR;
 }
 
 
-ALCboolean PortCapture::start()
+void PortCapture::start()
 {
-    PaError err{Pa_StartStream(mStream)};
+    const PaError err{Pa_StartStream(mStream)};
     if(err != paNoError)
-    {
-        ERR("Error starting stream: %s\n", Pa_GetErrorText(err));
-        return ALC_FALSE;
-    }
-    return ALC_TRUE;
+        throw al::backend_exception{al::backend_error::DeviceError,
+            "Failed to start recording: %s", Pa_GetErrorText(err)};
 }
 
 void PortCapture::stop()
@@ -360,14 +340,11 @@ void PortCapture::stop()
 }
 
 
-ALCuint PortCapture::availableSamples()
-{ return mRing->readSpace(); }
+uint PortCapture::availableSamples()
+{ return static_cast<uint>(mRing->readSpace()); }
 
-ALCenum PortCapture::captureSamples(ALCvoid *buffer, ALCuint samples)
-{
-    mRing->read(buffer, samples);
-    return ALC_NO_ERROR;
-}
+void PortCapture::captureSamples(al::byte *buffer, uint samples)
+{ mRing->read(buffer, samples); }
 
 } // namespace
 
@@ -435,16 +412,18 @@ bool PortBackendFactory::init()
 bool PortBackendFactory::querySupport(BackendType type)
 { return (type == BackendType::Playback || type == BackendType::Capture); }
 
-void PortBackendFactory::probe(DevProbe type, std::string *outnames)
+std::string PortBackendFactory::probe(BackendType type)
 {
+    std::string outnames;
     switch(type)
     {
-        case DevProbe::Playback:
-        case DevProbe::Capture:
-            /* Includes null char. */
-            outnames->append(pa_device, sizeof(pa_device));
-            break;
+    case BackendType::Playback:
+    case BackendType::Capture:
+        /* Includes null char. */
+        outnames.append(pa_device, sizeof(pa_device));
+        break;
     }
+    return outnames;
 }
 
 BackendPtr PortBackendFactory::createBackend(ALCdevice *device, BackendType type)

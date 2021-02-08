@@ -30,9 +30,9 @@
 #include "AL/efx.h"
 
 #include "alcontext.h"
-#include "alexcpt.h"
 #include "almalloc.h"
 #include "atomic.h"
+#include "core/except.h"
 #include "opthelpers.h"
 
 
@@ -44,7 +44,7 @@
 } while(0)
 
 
-AL_API ALvoid AL_APIENTRY alListenerf(ALenum param, ALfloat value)
+AL_API void AL_APIENTRY alListenerf(ALenum param, ALfloat value)
 START_API_FUNC
 {
     ContextRef context{GetContextRef()};
@@ -74,7 +74,7 @@ START_API_FUNC
 }
 END_API_FUNC
 
-AL_API ALvoid AL_APIENTRY alListener3f(ALenum param, ALfloat value1, ALfloat value2, ALfloat value3)
+AL_API void AL_APIENTRY alListener3f(ALenum param, ALfloat value1, ALfloat value2, ALfloat value3)
 START_API_FUNC
 {
     ContextRef context{GetContextRef()};
@@ -108,7 +108,7 @@ START_API_FUNC
 }
 END_API_FUNC
 
-AL_API ALvoid AL_APIENTRY alListenerfv(ALenum param, const ALfloat *values)
+AL_API void AL_APIENTRY alListenerfv(ALenum param, const ALfloat *values)
 START_API_FUNC
 {
     if(values)
@@ -156,7 +156,7 @@ START_API_FUNC
 END_API_FUNC
 
 
-AL_API ALvoid AL_APIENTRY alListeneri(ALenum param, ALint /*value*/)
+AL_API void AL_APIENTRY alListeneri(ALenum param, ALint /*value*/)
 START_API_FUNC
 {
     ContextRef context{GetContextRef()};
@@ -234,7 +234,7 @@ START_API_FUNC
 END_API_FUNC
 
 
-AL_API ALvoid AL_APIENTRY alGetListenerf(ALenum param, ALfloat *value)
+AL_API void AL_APIENTRY alGetListenerf(ALenum param, ALfloat *value)
 START_API_FUNC
 {
     ContextRef context{GetContextRef()};
@@ -260,7 +260,7 @@ START_API_FUNC
 }
 END_API_FUNC
 
-AL_API ALvoid AL_APIENTRY alGetListener3f(ALenum param, ALfloat *value1, ALfloat *value2, ALfloat *value3)
+AL_API void AL_APIENTRY alGetListener3f(ALenum param, ALfloat *value1, ALfloat *value2, ALfloat *value3)
 START_API_FUNC
 {
     ContextRef context{GetContextRef()};
@@ -290,7 +290,7 @@ START_API_FUNC
 }
 END_API_FUNC
 
-AL_API ALvoid AL_APIENTRY alGetListenerfv(ALenum param, ALfloat *values)
+AL_API void AL_APIENTRY alGetListenerfv(ALenum param, ALfloat *values)
 START_API_FUNC
 {
     switch(param)
@@ -332,7 +332,7 @@ START_API_FUNC
 END_API_FUNC
 
 
-AL_API ALvoid AL_APIENTRY alGetListeneri(ALenum param, ALint *value)
+AL_API void AL_APIENTRY alGetListeneri(ALenum param, ALint *value)
 START_API_FUNC
 {
     ContextRef context{GetContextRef()};
@@ -419,12 +419,12 @@ END_API_FUNC
 void UpdateListenerProps(ALCcontext *context)
 {
     /* Get an unused proprty container, or allocate a new one as needed. */
-    ALlistenerProps *props{context->mFreeListenerProps.load(std::memory_order_acquire)};
+    ListenerProps *props{context->mFreeListenerProps.load(std::memory_order_acquire)};
     if(!props)
-        props = new ALlistenerProps{};
+        props = new ListenerProps{};
     else
     {
-        ALlistenerProps *next;
+        ListenerProps *next;
         do {
             next = props->next.load(std::memory_order_relaxed);
         } while(context->mFreeListenerProps.compare_exchange_weak(props, next,
@@ -441,7 +441,7 @@ void UpdateListenerProps(ALCcontext *context)
     props->MetersPerUnit = listener.mMetersPerUnit;
 
     /* Set the new container for updating internal parameters. */
-    props = listener.Params.Update.exchange(props, std::memory_order_acq_rel);
+    props = context->mParams.ListenerUpdate.exchange(props, std::memory_order_acq_rel);
     if(props)
     {
         /* If there was an unused update container, put it back in the

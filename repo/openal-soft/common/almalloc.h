@@ -10,11 +10,19 @@
 #include <type_traits>
 #include <utility>
 
+#include "pragmadefs.h"
 
-void *al_malloc(size_t alignment, size_t size);
-void *al_calloc(size_t alignment, size_t size);
+
+[[gnu::alloc_align(1), gnu::alloc_size(2)]] void *al_malloc(size_t alignment, size_t size);
+[[gnu::alloc_align(1), gnu::alloc_size(2)]] void *al_calloc(size_t alignment, size_t size);
 void al_free(void *ptr) noexcept;
 
+
+#define DISABLE_ALLOC()                                                       \
+    void *operator new(size_t) = delete;                                      \
+    void *operator new[](size_t) = delete;                                    \
+    void operator delete(void*) noexcept = delete;                            \
+    void operator delete[](void*) noexcept = delete;
 
 #define DEF_NEWDEL(T)                                                         \
     void *operator new(size_t size)                                           \
@@ -23,68 +31,97 @@ void al_free(void *ptr) noexcept;
         if(!ret) throw std::bad_alloc();                                      \
         return ret;                                                           \
     }                                                                         \
-    void operator delete(void *block) noexcept { al_free(block); }
+    void *operator new[](size_t size) { return operator new(size); }          \
+    void operator delete(void *block) noexcept { al_free(block); }            \
+    void operator delete[](void *block) noexcept { operator delete(block); }
 
 #define DEF_PLACE_NEWDEL()                                                    \
     void *operator new(size_t /*size*/, void *ptr) noexcept { return ptr; }   \
+    void *operator new[](size_t /*size*/, void *ptr) noexcept { return ptr; } \
+    void operator delete(void *block, void*) noexcept { al_free(block); }     \
     void operator delete(void *block) noexcept { al_free(block); }            \
-    void operator delete(void* /*block*/, void* /*ptr*/) noexcept { }
+    void operator delete[](void *block, void*) noexcept { al_free(block); }   \
+    void operator delete[](void *block) noexcept { al_free(block); }
+
+enum FamCount : size_t { };
+
+#define DEF_FAM_NEWDEL(T, FamMem)                                             \
+    static constexpr size_t Sizeof(size_t count) noexcept                     \
+    {                                                                         \
+        return std::max<size_t>(sizeof(T),                                    \
+            decltype(FamMem)::Sizeof(count, offsetof(T, FamMem)));            \
+    }                                                                         \
+                                                                              \
+    void *operator new(size_t /*size*/, FamCount count)                       \
+    {                                                                         \
+        if(void *ret{al_malloc(alignof(T), T::Sizeof(count))})                \
+            return ret;                                                       \
+        throw std::bad_alloc();                                               \
+    }                                                                         \
+    void *operator new[](size_t /*size*/) = delete;                           \
+    void operator delete(void *block, FamCount) { al_free(block); }           \
+    void operator delete(void *block) noexcept { al_free(block); }            \
+    void operator delete[](void* /*block*/) = delete;
+
 
 namespace al {
 
-#define REQUIRES(...) typename std::enable_if<(__VA_ARGS__),int>::type = 0
-
-template<typename T, size_t alignment=alignof(T)>
-struct allocator : public std::allocator<T> {
-    using size_type = size_t;
+template<typename T, std::size_t alignment=alignof(T)>
+struct allocator {
+    using value_type = T;
+    using reference = T&;
+    using const_reference = const T&;
     using pointer = T*;
     using const_pointer = const T*;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using is_always_equal = std::true_type;
 
     template<typename U>
     struct rebind {
-        using other = allocator<U, alignment>;
+        using other = allocator<U, (alignment<alignof(U))?alignof(U):alignment>;
     };
 
-    pointer allocate(size_type n, const void* = nullptr)
+    constexpr explicit allocator() noexcept = default;
+    template<typename U, std::size_t N>
+    constexpr explicit allocator(const allocator<U,N>&) noexcept { }
+
+    T *allocate(std::size_t n)
     {
-        if(n > std::numeric_limits<size_t>::max() / sizeof(T))
-            throw std::bad_alloc();
-
-        void *ret{al_malloc(alignment, n*sizeof(T))};
-        if(!ret) throw std::bad_alloc();
-        return static_cast<pointer>(ret);
+        if(n > std::numeric_limits<std::size_t>::max()/sizeof(T)) throw std::bad_alloc();
+        if(auto p = al_malloc(alignment, n*sizeof(T))) return static_cast<T*>(p);
+        throw std::bad_alloc();
     }
-
-    void deallocate(pointer p, size_type)
-    { al_free(p); }
-
-    allocator() : std::allocator<T>() { }
-    allocator(const allocator &a) : std::allocator<T>(a) { }
-    template<class U>
-    allocator(const allocator<U,alignment> &a) : std::allocator<T>(a)
-    { }
+    void deallocate(T *p, std::size_t) noexcept { al_free(p); }
 };
+template<typename T, std::size_t N, typename U, std::size_t M>
+bool operator==(const allocator<T,N>&, const allocator<U,M>&) noexcept { return true; }
+template<typename T, std::size_t N, typename U, std::size_t M>
+bool operator!=(const allocator<T,N>&, const allocator<U,M>&) noexcept { return false; }
 
 template<size_t alignment, typename T>
-inline T* assume_aligned(T *ptr) noexcept
+[[gnu::assume_aligned(alignment)]] inline T* assume_aligned(T *ptr) noexcept { return ptr; }
+
+/* At least VS 2015 complains that 'ptr' is unused when the given type's
+ * destructor is trivial (a no-op). So disable that warning for this call.
+ */
+DIAGNOSTIC_PUSH
+msc_pragma(warning(disable : 4100))
+template<typename T>
+constexpr std::enable_if_t<!std::is_array<T>::value>
+destroy_at(T *ptr) noexcept(std::is_nothrow_destructible<T>::value)
+{ ptr->~T(); }
+DIAGNOSTIC_POP
+template<typename T>
+constexpr std::enable_if_t<std::is_array<T>::value>
+destroy_at(T *ptr) noexcept(std::is_nothrow_destructible<T>::value)
 {
-    static_assert((alignment & (alignment-1)) == 0, "alignment must be a power of 2");
-#ifdef __GNUC__
-    return static_cast<T*>(__builtin_assume_aligned(ptr, alignment));
-#elif defined(_MSC_VER)
-    auto ptrval = reinterpret_cast<uintptr_t>(ptr);
-    if((ptrval&(alignment-1)) != 0) __assume(0);
-    return reinterpret_cast<T*>(ptrval);
-#else
-    return ptr;
-#endif
+    for(auto &elem : *ptr)
+        al::destroy_at(std::addressof(elem));
 }
 
 template<typename T>
-inline void destroy_at(T *ptr) { ptr->~T(); }
-
-template<typename T>
-inline void destroy(T first, const T end)
+constexpr void destroy(T first, T end)
 {
     while(first != end)
     {
@@ -93,8 +130,9 @@ inline void destroy(T first, const T end)
     }
 }
 
-template<typename T, typename N, REQUIRES(std::is_integral<N>::value)>
-inline T destroy_n(T first, N count)
+template<typename T, typename N>
+constexpr std::enable_if_t<std::is_integral<N>::value,T>
+destroy_n(T first, N count)
 {
     if(count != 0)
     {
@@ -107,26 +145,9 @@ inline T destroy_n(T first, N count)
 }
 
 
-template<typename T>
-inline void uninitialized_default_construct(T first, const T last)
-{
-    using ValueT = typename std::iterator_traits<T>::value_type;
-    T current{first};
-    try {
-        while(current != last)
-        {
-            ::new (static_cast<void*>(std::addressof(*current))) ValueT;
-            ++current;
-        }
-    }
-    catch(...) {
-        destroy(first, current);
-        throw;
-    }
-}
-
-template<typename T, typename N, REQUIRES(std::is_integral<N>::value)>
-inline T uninitialized_default_construct_n(T first, N count)
+template<typename T, typename N>
+inline std::enable_if_t<std::is_integral<N>::value,T>
+uninitialized_default_construct_n(T first, N count)
 {
     using ValueT = typename std::iterator_traits<T>::value_type;
     T current{first};
@@ -134,12 +155,12 @@ inline T uninitialized_default_construct_n(T first, N count)
     {
         try {
             do {
-                ::new (static_cast<void*>(std::addressof(*current))) ValueT;
+                ::new(static_cast<void*>(std::addressof(*current))) ValueT;
                 ++current;
             } while(--count);
         }
         catch(...) {
-            destroy(first, current);
+            al::destroy(first, current);
             throw;
         }
     }
@@ -147,56 +168,55 @@ inline T uninitialized_default_construct_n(T first, N count)
 }
 
 
-template<typename T0, typename T1>
-inline T1 uninitialized_move(T0 first, const T0 last, const T1 output)
-{
-    using ValueT = typename std::iterator_traits<T1>::value_type;
-    T1 current{output};
-    try {
-        while(first != last)
-        {
-            ::new (static_cast<void*>(std::addressof(*current))) ValueT{std::move(*first)};
-            ++current;
-            ++first;
-        }
-    }
-    catch(...) {
-        destroy(output, current);
-        throw;
-    }
-    return current;
-}
-
-template<typename T0, typename N, typename T1, REQUIRES(std::is_integral<N>::value)>
-inline T1 uninitialized_move_n(T0 first, N count, const T1 output)
-{
-    using ValueT = typename std::iterator_traits<T1>::value_type;
-    T1 current{output};
-    if(count != 0)
-    {
-        try {
-            do {
-                ::new (static_cast<void*>(std::addressof(*current))) ValueT{std::move(*first)};
-                ++current;
-                ++first;
-            } while(--count);
-        }
-        catch(...) {
-            destroy(output, current);
-            throw;
-        }
-    }
-    return current;
-}
-
-
-/* std::make_unique was added with C++14, so until we rely on that, make our
- * own version.
+/* Storage for flexible array data. This is trivially destructible if type T is
+ * trivially destructible.
  */
-template<typename T, typename ...ArgsT>
-std::unique_ptr<T> make_unique(ArgsT&&...args)
-{ return std::unique_ptr<T>{new T{std::forward<ArgsT>(args)...}}; }
+template<typename T, size_t alignment, bool = std::is_trivially_destructible<T>::value>
+struct FlexArrayStorage;
 
+template<typename T, size_t alignment>
+struct FlexArrayStorage<T,alignment,true> {
+    const size_t mSize;
+    union {
+        char mDummy;
+        alignas(alignment) T mArray[1];
+    };
+
+    static constexpr size_t Sizeof(size_t count, size_t base=0u) noexcept
+    {
+        return std::max<size_t>(offsetof(FlexArrayStorage, mArray) + sizeof(T)*count,
+            sizeof(FlexArrayStorage)) + base;
+    }
+
+    FlexArrayStorage(size_t size) : mSize{size}
+    { al::uninitialized_default_construct_n(mArray, mSize); }
+    ~FlexArrayStorage() = default;
+
+    FlexArrayStorage(const FlexArrayStorage&) = delete;
+    FlexArrayStorage& operator=(const FlexArrayStorage&) = delete;
+};
+
+template<typename T, size_t alignment>
+struct FlexArrayStorage<T,alignment,false> {
+    const size_t mSize;
+    union {
+        char mDummy;
+        alignas(alignment) T mArray[1];
+    };
+
+    static constexpr size_t Sizeof(size_t count, size_t base) noexcept
+    {
+        return std::max<size_t>(offsetof(FlexArrayStorage, mArray) + sizeof(T)*count,
+            sizeof(FlexArrayStorage)) + base;
+    }
+
+    FlexArrayStorage(size_t size) : mSize{size}
+    { al::uninitialized_default_construct_n(mArray, mSize); }
+    ~FlexArrayStorage() { al::destroy_n(mArray, mSize); }
+
+    FlexArrayStorage(const FlexArrayStorage&) = delete;
+    FlexArrayStorage& operator=(const FlexArrayStorage&) = delete;
+};
 
 /* A flexible array type. Used either standalone or at the end of a parent
  * struct, with placement new, to have a run-time-sized array that's embedded
@@ -205,7 +225,7 @@ std::unique_ptr<T> make_unique(ArgsT&&...args)
 template<typename T, size_t alignment=alignof(T)>
 struct FlexArray {
     using element_type = T;
-    using value_type = typename std::remove_cv<T>::type;
+    using value_type = std::remove_cv_t<T>;
     using index_type = size_t;
     using difference_type = ptrdiff_t;
 
@@ -219,49 +239,42 @@ struct FlexArray {
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
+    using Storage_t_ = FlexArrayStorage<element_type,alignment>;
 
-    const index_type mSize;
-    alignas(alignment) element_type mArray[0];
+    Storage_t_ mStore;
 
+    static constexpr index_type Sizeof(index_type count, index_type base=0u) noexcept
+    { return Storage_t_::Sizeof(count, base); }
     static std::unique_ptr<FlexArray> Create(index_type count)
     {
         void *ptr{al_calloc(alignof(FlexArray), Sizeof(count))};
-        return std::unique_ptr<FlexArray>{new (ptr) FlexArray{count}};
-    }
-    static constexpr index_type Sizeof(index_type count, index_type base=0u) noexcept
-    {
-        return base +
-            std::max<index_type>(offsetof(FlexArray, mArray) + sizeof(T)*count, sizeof(FlexArray));
+        return std::unique_ptr<FlexArray>{new(ptr) FlexArray{count}};
     }
 
-    FlexArray(index_type size) : mSize{size}
-    { uninitialized_default_construct_n(mArray, mSize); }
-    ~FlexArray() { destroy_n(mArray, mSize); }
+    FlexArray(index_type size) : mStore{size} { }
+    ~FlexArray() = default;
 
-    FlexArray(const FlexArray&) = delete;
-    FlexArray& operator=(const FlexArray&) = delete;
+    index_type size() const noexcept { return mStore.mSize; }
+    bool empty() const noexcept { return mStore.mSize == 0; }
 
-    index_type size() const noexcept { return mSize; }
-    bool empty() const noexcept { return mSize == 0; }
+    pointer data() noexcept { return mStore.mArray; }
+    const_pointer data() const noexcept { return mStore.mArray; }
 
-    pointer data() noexcept { return mArray; }
-    const_pointer data() const noexcept { return mArray; }
+    reference operator[](index_type i) noexcept { return mStore.mArray[i]; }
+    const_reference operator[](index_type i) const noexcept { return mStore.mArray[i]; }
 
-    reference operator[](index_type i) noexcept { return mArray[i]; }
-    const_reference operator[](index_type i) const noexcept { return mArray[i]; }
+    reference front() noexcept { return mStore.mArray[0]; }
+    const_reference front() const noexcept { return mStore.mArray[0]; }
 
-    reference front() noexcept { return mArray[0]; }
-    const_reference front() const noexcept { return mArray[0]; }
+    reference back() noexcept { return mStore.mArray[mStore.mSize-1]; }
+    const_reference back() const noexcept { return mStore.mArray[mStore.mSize-1]; }
 
-    reference back() noexcept { return mArray[mSize-1]; }
-    const_reference back() const noexcept { return mArray[mSize-1]; }
-
-    iterator begin() noexcept { return mArray; }
-    const_iterator begin() const noexcept { return mArray; }
-    const_iterator cbegin() const noexcept { return mArray; }
-    iterator end() noexcept { return mArray + mSize; }
-    const_iterator end() const noexcept { return mArray + mSize; }
-    const_iterator cend() const noexcept { return mArray + mSize; }
+    iterator begin() noexcept { return mStore.mArray; }
+    const_iterator begin() const noexcept { return mStore.mArray; }
+    const_iterator cbegin() const noexcept { return mStore.mArray; }
+    iterator end() noexcept { return mStore.mArray + mStore.mSize; }
+    const_iterator end() const noexcept { return mStore.mArray + mStore.mSize; }
+    const_iterator cend() const noexcept { return mStore.mArray + mStore.mSize; }
 
     reverse_iterator rbegin() noexcept { return end(); }
     const_reverse_iterator rbegin() const noexcept { return end(); }
@@ -272,8 +285,6 @@ struct FlexArray {
 
     DEF_PLACE_NEWDEL()
 };
-
-#undef REQUIRES
 
 } // namespace al
 

@@ -74,6 +74,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -87,6 +88,9 @@
 #include "../getopt.h"
 #endif
 
+#include "alfstream.h"
+#include "alspan.h"
+#include "alstring.h"
 #include "loaddef.h"
 #include "loadsofa.h"
 
@@ -125,15 +129,11 @@ enum HeadModelT {
 
 // The limits to the truncation window size on the command line.
 #define MIN_TRUNCSIZE                (16)
-#define MAX_TRUNCSIZE                (512)
+#define MAX_TRUNCSIZE                (128)
 
 // The limits to the custom head radius on the command line.
 #define MIN_CUSTOM_RADIUS            (0.05)
 #define MAX_CUSTOM_RADIUS            (0.15)
-
-// The truncation window size must be a multiple of the below value to allow
-// for vectorized convolution.
-#define MOD_TRUNCSIZE                (8)
 
 // The defaults for the command line options.
 #define DEFAULT_FFTSIZE              (65536)
@@ -148,8 +148,8 @@ enum HeadModelT {
 #define MAX_HRTD                     (63.0)
 
 // The OpenAL Soft HRTF format marker.  It stands for minimum-phase head
-// response protocol 02.
-#define MHR_FORMAT                   ("MinPHR02")
+// response protocol 03.
+#define MHR_FORMAT                   ("MinPHR03")
 
 /* Channel index enums. Mono uses LeftChannel only. */
 enum ChannelIndex : uint {
@@ -162,42 +162,31 @@ enum ChannelIndex : uint {
  * pattern string are replaced with the replacement string.  The result is
  * truncated if necessary.
  */
-static int StrSubst(const char *in, const char *pat, const char *rep, const size_t maxLen, char *out)
+static std::string StrSubst(al::span<const char> in, const al::span<const char> pat,
+    const al::span<const char> rep)
 {
-    size_t inLen, patLen, repLen;
-    size_t si, di;
-    int truncated;
+    std::string ret;
+    ret.reserve(in.size() + pat.size());
 
-    inLen = strlen(in);
-    patLen = strlen(pat);
-    repLen = strlen(rep);
-    si = 0;
-    di = 0;
-    truncated = 0;
-    while(si < inLen && di < maxLen)
+    while(in.size() >= pat.size())
     {
-        if(patLen <= inLen-si)
+        if(al::strncasecmp(in.data(), pat.data(), pat.size()) == 0)
         {
-            if(strncasecmp(&in[si], pat, patLen) == 0)
-            {
-                if(repLen > maxLen-di)
-                {
-                    repLen = maxLen - di;
-                    truncated = 1;
-                }
-                strncpy(&out[di], rep, repLen);
-                si += patLen;
-                di += repLen;
-            }
+            in = in.subspan(pat.size());
+            ret.append(rep.data(), rep.size());
         }
-        out[di] = in[si];
-        si++;
-        di++;
+        else
+        {
+            size_t endpos{1};
+            while(endpos < in.size() && in[endpos] != pat.front())
+                ++endpos;
+            ret.append(in.data(), endpos);
+            in = in.subspan(endpos);
+        }
     }
-    if(si < inLen)
-        truncated = 1;
-    out[di] = '\0';
-    return !truncated;
+    ret.append(in.data(), in.size());
+
+    return ret;
 }
 
 
@@ -220,15 +209,16 @@ static inline uint dither_rng(uint *seed)
 // Performs a triangular probability density function dither. The input samples
 // should be normalized (-1 to +1).
 static void TpdfDither(double *RESTRICT out, const double *RESTRICT in, const double scale,
-                       const int count, const int step, uint *seed)
+                       const uint count, const uint step, uint *seed)
 {
     static constexpr double PRNG_SCALE = 1.0 / std::numeric_limits<uint>::max();
 
-    for(int i{0};i < count;i++)
+    for(uint i{0};i < count;i++)
     {
         uint prn0{dither_rng(seed)};
         uint prn1{dither_rng(seed)};
-        out[i*step] = std::round(in[i]*scale + (prn0*PRNG_SCALE - prn1*PRNG_SCALE));
+        *out = std::round(*(in++)*scale + (prn0*PRNG_SCALE - prn1*PRNG_SCALE));
+        out += step;
     }
 }
 
@@ -254,18 +244,18 @@ static void FftArrange(const uint n, complex_d *inout)
 }
 
 // Performs the summation.
-static void FftSummation(const int n, const double s, complex_d *cplx)
+static void FftSummation(const uint n, const double s, complex_d *cplx)
 {
     double pi;
-    int m, m2;
-    int i, k, mk;
+    uint m, m2;
+    uint i, k, mk;
 
     pi = s * M_PI;
     for(m = 1, m2 = 2;m < n; m <<= 1, m2 <<= 1)
     {
         // v = Complex (-2.0 * sin (0.5 * pi / m) * sin (0.5 * pi / m), -sin (pi / m))
-        double sm = sin(0.5 * pi / m);
-        auto v = complex_d{-2.0*sm*sm, -sin(pi / m)};
+        double sm = std::sin(0.5 * pi / m);
+        auto v = complex_d{-2.0*sm*sm, -std::sin(pi / m)};
         auto w = complex_d{1.0, 0.0};
         for(i = 0;i < m;i++)
         {
@@ -368,17 +358,13 @@ static void LimitMagnitudeResponse(const uint n, const uint m, const double limi
  * residuals (which were discarded).  The mirrored half of the response is
  * reconstructed.
  */
-static void MinimumPhase(const uint n, const double *in, complex_d *out)
+static void MinimumPhase(const uint n, double *mags, complex_d *out)
 {
-    const uint m = 1 + (n / 2);
-    std::vector<double> mags(n);
+    const uint m{(n/2) + 1};
 
     uint i;
     for(i = 0;i < m;i++)
-    {
-        mags[i] = std::max(EPSILON, in[i]);
-        out[i] = complex_d{std::log(mags[i]), 0.0};
-    }
+        out[i] = std::log(mags[i]);
     for(;i < n;i++)
     {
         mags[i] = mags[n - i];
@@ -390,240 +376,7 @@ static void MinimumPhase(const uint n, const double *in, complex_d *out)
     for(i = 0;i < n;i++)
     {
         auto a = std::exp(complex_d{0.0, out[i].imag()});
-        out[i] = complex_d{mags[i], 0.0} * a;
-    }
-}
-
-
-/***************************
- *** Resampler functions ***
- ***************************/
-
-/* This is the normalized cardinal sine (sinc) function.
- *
- *   sinc(x) = { 1,                   x = 0
- *             { sin(pi x) / (pi x),  otherwise.
- */
-static double Sinc(const double x)
-{
-    if(std::abs(x) < EPSILON)
-        return 1.0;
-    return std::sin(M_PI * x) / (M_PI * x);
-}
-
-/* The zero-order modified Bessel function of the first kind, used for the
- * Kaiser window.
- *
- *   I_0(x) = sum_{k=0}^inf (1 / k!)^2 (x / 2)^(2 k)
- *          = sum_{k=0}^inf ((x / 2)^k / k!)^2
- */
-static double BesselI_0(const double x)
-{
-    double term, sum, x2, y, last_sum;
-    int k;
-
-    // Start at k=1 since k=0 is trivial.
-    term = 1.0;
-    sum = 1.0;
-    x2 = x/2.0;
-    k = 1;
-
-    // Let the integration converge until the term of the sum is no longer
-    // significant.
-    do {
-        y = x2 / k;
-        k++;
-        last_sum = sum;
-        term *= y * y;
-        sum += term;
-    } while(sum != last_sum);
-    return sum;
-}
-
-/* Calculate a Kaiser window from the given beta value and a normalized k
- * [-1, 1].
- *
- *   w(k) = { I_0(B sqrt(1 - k^2)) / I_0(B),  -1 <= k <= 1
- *          { 0,                              elsewhere.
- *
- * Where k can be calculated as:
- *
- *   k = i / l,         where -l <= i <= l.
- *
- * or:
- *
- *   k = 2 i / M - 1,   where 0 <= i <= M.
- */
-static double Kaiser(const double b, const double k)
-{
-    if(!(k >= -1.0 && k <= 1.0))
-        return 0.0;
-    return BesselI_0(b * std::sqrt(1.0 - k*k)) / BesselI_0(b);
-}
-
-// Calculates the greatest common divisor of a and b.
-static uint Gcd(uint x, uint y)
-{
-    while(y > 0)
-    {
-        uint z{y};
-        y = x % y;
-        x = z;
-    }
-    return x;
-}
-
-/* Calculates the size (order) of the Kaiser window.  Rejection is in dB and
- * the transition width is normalized frequency (0.5 is nyquist).
- *
- *   M = { ceil((r - 7.95) / (2.285 2 pi f_t)),  r > 21
- *       { ceil(5.79 / 2 pi f_t),                r <= 21.
- *
- */
-static uint CalcKaiserOrder(const double rejection, const double transition)
-{
-    double w_t = 2.0 * M_PI * transition;
-    if(rejection > 21.0)
-        return static_cast<uint>(std::ceil((rejection - 7.95) / (2.285 * w_t)));
-    return static_cast<uint>(std::ceil(5.79 / w_t));
-}
-
-// Calculates the beta value of the Kaiser window.  Rejection is in dB.
-static double CalcKaiserBeta(const double rejection)
-{
-    if(rejection > 50.0)
-        return 0.1102 * (rejection - 8.7);
-    if(rejection >= 21.0)
-        return (0.5842 * std::pow(rejection - 21.0, 0.4)) +
-               (0.07886 * (rejection - 21.0));
-    return 0.0;
-}
-
-/* Calculates a point on the Kaiser-windowed sinc filter for the given half-
- * width, beta, gain, and cutoff.  The point is specified in non-normalized
- * samples, from 0 to M, where M = (2 l + 1).
- *
- *   w(k) 2 p f_t sinc(2 f_t x)
- *
- *   x    -- centered sample index (i - l)
- *   k    -- normalized and centered window index (x / l)
- *   w(k) -- window function (Kaiser)
- *   p    -- gain compensation factor when sampling
- *   f_t  -- normalized center frequency (or cutoff; 0.5 is nyquist)
- */
-static double SincFilter(const int l, const double b, const double gain, const double cutoff, const int i)
-{
-    return Kaiser(b, static_cast<double>(i - l) / l) * 2.0 * gain * cutoff * Sinc(2.0 * cutoff * (i - l));
-}
-
-/* This is a polyphase sinc-filtered resampler.
- *
- *              Upsample                      Downsample
- *
- *              p/q = 3/2                     p/q = 3/5
- *
- *          M-+-+-+->                     M-+-+-+->
- *         -------------------+          ---------------------+
- *   p  s * f f f f|f|        |    p  s * f f f f f           |
- *   |  0 *   0 0 0|0|0       |    |  0 *   0 0 0 0|0|        |
- *   v  0 *     0 0|0|0 0     |    v  0 *     0 0 0|0|0       |
- *      s *       f|f|f f f   |       s *       f f|f|f f     |
- *      0 *        |0|0 0 0 0 |       0 *         0|0|0 0 0   |
- *         --------+=+--------+       0 *          |0|0 0 0 0 |
- *          d . d .|d|. d . d            ----------+=+--------+
- *                                        d . . . .|d|. . . .
- *          q->
- *                                        q-+-+-+->
- *
- *   P_f(i,j) = q i mod p + pj
- *   P_s(i,j) = floor(q i / p) - j
- *   d[i=0..N-1] = sum_{j=0}^{floor((M - 1) / p)} {
- *                   { f[P_f(i,j)] s[P_s(i,j)],  P_f(i,j) < M
- *                   { 0,                        P_f(i,j) >= M. }
- */
-
-// Calculate the resampling metrics and build the Kaiser-windowed sinc filter
-// that's used to cut frequencies above the destination nyquist.
-void ResamplerSetup(ResamplerT *rs, const uint srcRate, const uint dstRate)
-{
-    double cutoff, width, beta;
-    uint gcd, l;
-    int i;
-
-    gcd = Gcd(srcRate, dstRate);
-    rs->mP = dstRate / gcd;
-    rs->mQ = srcRate / gcd;
-    /* The cutoff is adjusted by half the transition width, so the transition
-     * ends before the nyquist (0.5).  Both are scaled by the downsampling
-     * factor.
-     */
-    if(rs->mP > rs->mQ)
-    {
-        cutoff = 0.475 / rs->mP;
-        width = 0.05 / rs->mP;
-    }
-    else
-    {
-        cutoff = 0.475 / rs->mQ;
-        width = 0.05 / rs->mQ;
-    }
-    // A rejection of -180 dB is used for the stop band. Round up when
-    // calculating the left offset to avoid increasing the transition width.
-    l = (CalcKaiserOrder(180.0, width)+1) / 2;
-    beta = CalcKaiserBeta(180.0);
-    rs->mM = l*2 + 1;
-    rs->mL = l;
-    rs->mF.resize(rs->mM);
-    for(i = 0;i < (static_cast<int>(rs->mM));i++)
-        rs->mF[i] = SincFilter(static_cast<int>(l), beta, rs->mP, cutoff, i);
-}
-
-// Perform the upsample-filter-downsample resampling operation using a
-// polyphase filter implementation.
-void ResamplerRun(ResamplerT *rs, const uint inN, const double *in, const uint outN, double *out)
-{
-    const uint p = rs->mP, q = rs->mQ, m = rs->mM, l = rs->mL;
-    std::vector<double> workspace;
-    const double *f = rs->mF.data();
-    uint j_f, j_s;
-    double *work;
-    uint i;
-
-    if(outN == 0)
-        return;
-
-    // Handle in-place operation.
-    if(in == out)
-    {
-        workspace.resize(outN);
-        work = workspace.data();
-    }
-    else
-        work = out;
-    // Resample the input.
-    for(i = 0;i < outN;i++)
-    {
-        double r = 0.0;
-        // Input starts at l to compensate for the filter delay.  This will
-        // drop any build-up from the first half of the filter.
-        j_f = (l + (q * i)) % p;
-        j_s = (l + (q * i)) / p;
-        while(j_f < m)
-        {
-            // Only take input when 0 <= j_s < inN.  This single unsigned
-            // comparison catches both cases.
-            if(j_s < inN)
-                r += f[j_f] * in[j_s];
-            j_f += p;
-            j_s--;
-        }
-        work[i] = r;
-    }
-    // Clean up after in-place operation.
-    if(work != out)
-    {
-        for(i = 0;i < outN;i++)
-            out[i] = work[i];
+        out[i] = a * mags[i];
     }
 }
 
@@ -668,11 +421,11 @@ static int WriteBin4(const uint bytes, const uint32_t in, FILE *fp, const char *
 // Store the OpenAL Soft HRTF data set.
 static int StoreMhr(const HrirDataT *hData, const char *filename)
 {
-    uint channels = (hData->mChannelType == CT_STEREO) ? 2 : 1;
-    uint n = hData->mIrPoints;
-    FILE *fp;
+    const uint channels{(hData->mChannelType == CT_STEREO) ? 2u : 1u};
+    const uint n{hData->mIrPoints};
+    uint dither_seed{22222};
     uint fi, ei, ai, i;
-    uint dither_seed = 22222;
+    FILE *fp;
 
     if((fp=fopen(filename, "wb")) == nullptr)
     {
@@ -683,15 +436,13 @@ static int StoreMhr(const HrirDataT *hData, const char *filename)
         return 0;
     if(!WriteBin4(4, hData->mIrRate, fp, filename))
         return 0;
-    if(!WriteBin4(1, static_cast<uint32_t>(hData->mSampleType), fp, filename))
-        return 0;
     if(!WriteBin4(1, static_cast<uint32_t>(hData->mChannelType), fp, filename))
         return 0;
     if(!WriteBin4(1, hData->mIrPoints, fp, filename))
         return 0;
     if(!WriteBin4(1, hData->mFdCount, fp, filename))
         return 0;
-    for(fi = 0;fi < hData->mFdCount;fi++)
+    for(fi = hData->mFdCount-1;fi < hData->mFdCount;fi--)
     {
         auto fdist = static_cast<uint32_t>(std::round(1000.0 * hData->mFds[fi].mDistance));
         if(!WriteBin4(2, fdist, fp, filename))
@@ -705,12 +456,10 @@ static int StoreMhr(const HrirDataT *hData, const char *filename)
         }
     }
 
-    for(fi = 0;fi < hData->mFdCount;fi++)
+    for(fi = hData->mFdCount-1;fi < hData->mFdCount;fi--)
     {
-        const double scale = (hData->mSampleType == ST_S16) ? 32767.0 :
-                             ((hData->mSampleType == ST_S24) ? 8388607.0 : 0.0);
-        const int bps = (hData->mSampleType == ST_S16) ? 2 :
-                        ((hData->mSampleType == ST_S24) ? 3 : 0);
+        constexpr double scale{8388607.0};
+        constexpr uint bps{3u};
 
         for(ei = 0;ei < hData->mFds[fi].mEvCount;ei++)
         {
@@ -724,30 +473,29 @@ static int StoreMhr(const HrirDataT *hData, const char *filename)
                     TpdfDither(out+1, azd->mIrs[1], scale, n, channels, &dither_seed);
                 for(i = 0;i < (channels * n);i++)
                 {
-                    int v = static_cast<int>(Clamp(out[i], -scale-1.0, scale));
+                    const auto v = static_cast<int>(Clamp(out[i], -scale-1.0, scale));
                     if(!WriteBin4(bps, static_cast<uint32_t>(v), fp, filename))
                         return 0;
                 }
             }
         }
     }
-    for(fi = 0;fi < hData->mFdCount;fi++)
+    for(fi = hData->mFdCount-1;fi < hData->mFdCount;fi--)
     {
+        /* Delay storage has 2 bits of extra precision. */
+        constexpr double DelayPrecScale{4.0};
         for(ei = 0;ei < hData->mFds[fi].mEvCount;ei++)
         {
             for(ai = 0;ai < hData->mFds[fi].mEvs[ei].mAzCount;ai++)
             {
                 const HrirAzT &azd = hData->mFds[fi].mEvs[ei].mAzs[ai];
-                int v = static_cast<int>(std::min(std::round(hData->mIrRate * azd.mDelays[0]), MAX_HRTD));
 
-                if(!WriteBin4(1, static_cast<uint32_t>(v), fp, filename))
-                    return 0;
+                auto v = static_cast<uint>(std::round(azd.mDelays[0]*DelayPrecScale));
+                if(!WriteBin4(1, v, fp, filename)) return 0;
                 if(hData->mChannelType == CT_STEREO)
                 {
-                    v = static_cast<int>(std::min(std::round(hData->mIrRate * azd.mDelays[1]), MAX_HRTD));
-
-                    if(!WriteBin4(1, static_cast<uint32_t>(v), fp, filename))
-                        return 0;
+                    v = static_cast<uint>(std::round(azd.mDelays[1]*DelayPrecScale));
+                    if(!WriteBin4(1, v, fp, filename)) return 0;
                 }
             }
         }
@@ -952,129 +700,88 @@ static void DiffuseFieldEqualize(const uint channels, const uint m, const double
     }
 }
 
-/* Perform minimum-phase reconstruction using the magnitude responses of the
- * HRIR set. Work is delegated to this struct, which runs asynchronously on one
- * or more threads (sharing the same reconstructor object).
- */
-struct HrirReconstructor {
-    std::vector<double*> mIrs;
-    std::atomic<size_t> mCurrent;
-    std::atomic<size_t> mDone;
-    size_t mFftSize;
-    size_t mIrPoints;
-
-    void Worker()
-    {
-        auto h = std::vector<complex_d>(mFftSize);
-
-        while(1)
-        {
-            /* Load the current index to process. */
-            size_t idx{mCurrent.load()};
-            do {
-                /* If the index is at the end, we're done. */
-                if(idx >= mIrs.size())
-                    return;
-                /* Otherwise, increment the current index atomically so other
-                 * threads know to go to the next one. If this call fails, the
-                 * current index was just changed by another thread and the new
-                 * value is loaded into idx, which we'll recheck.
-                 */
-            } while(!mCurrent.compare_exchange_weak(idx, idx+1, std::memory_order_relaxed));
-
-            /* Now do the reconstruction, and apply the inverse FFT to get the
-             * time-domain response.
-             */
-            MinimumPhase(mFftSize, mIrs[idx], h.data());
-            FftInverse(mFftSize, h.data());
-            for(size_t i{0u};i < mIrPoints;++i)
-                mIrs[idx][i] = h[i].real();
-
-            /* Increment the number of IRs done. */
-            mDone.fetch_add(1);
-        }
-    }
-};
-
-static void ReconstructHrirs(const HrirDataT *hData)
-{
-    const uint channels{(hData->mChannelType == CT_STEREO) ? 2u : 1u};
-
-    /* Count the number of IRs to process (excluding elevations that will be
-     * synthesized later).
-     */
-    size_t total{hData->mIrCount};
-    for(uint fi{0u};fi < hData->mFdCount;fi++)
-    {
-        for(uint ei{0u};ei < hData->mFds[fi].mEvStart;ei++)
-            total -= hData->mFds[fi].mEvs[ei].mAzCount;
-    }
-    total *= channels;
-
-    /* Set up the reconstructor with the needed size info and pointers to the
-     * IRs to process.
-     */
-    HrirReconstructor reconstructor;
-    reconstructor.mIrs.reserve(total);
-    reconstructor.mCurrent.store(0, std::memory_order_relaxed);
-    reconstructor.mDone.store(0, std::memory_order_relaxed);
-    reconstructor.mFftSize = hData->mFftSize;
-    reconstructor.mIrPoints = hData->mIrPoints;
-    for(uint fi{0u};fi < hData->mFdCount;fi++)
-    {
-        const HrirFdT &field = hData->mFds[fi];
-        for(uint ei{field.mEvStart};ei < field.mEvCount;ei++)
-        {
-            const HrirEvT &elev = field.mEvs[ei];
-            for(uint ai{0u};ai < elev.mAzCount;ai++)
-            {
-                const HrirAzT &azd = elev.mAzs[ai];
-                for(uint ti{0u};ti < channels;ti++)
-                    reconstructor.mIrs.push_back(azd.mIrs[ti]);
-            }
-        }
-    }
-
-    /* Launch two threads to work on reconstruction. */
-    std::thread thrd1{std::mem_fn(&HrirReconstructor::Worker), &reconstructor};
-    std::thread thrd2{std::mem_fn(&HrirReconstructor::Worker), &reconstructor};
-
-    /* Keep track of the number of IRs done, periodically reporting it. */
-    size_t count;
-    while((count=reconstructor.mDone.load()) != total)
-    {
-        size_t pcdone{count * 100 / total};
-
-        printf("\r%3zu%% done (%zu of %zu)", pcdone, count, total);
-        fflush(stdout);
-
-        std::this_thread::sleep_for(std::chrono::milliseconds{50});
-    }
-    size_t pcdone{count * 100 / total};
-    printf("\r%3zu%% done (%zu of %zu)\n", pcdone, count, total);
-
-    if(thrd2.joinable()) thrd2.join();
-    if(thrd1.joinable()) thrd1.join();
-}
-
 // Resamples the HRIRs for use at the given sampling rate.
 static void ResampleHrirs(const uint rate, HrirDataT *hData)
 {
-    uint channels = (hData->mChannelType == CT_STEREO) ? 2 : 1;
-    uint n = hData->mIrPoints;
-    uint ti, fi, ei, ai;
-    ResamplerT rs;
+    struct Resampler {
+        const double scale;
+        const size_t m;
 
-    ResamplerSetup(&rs, hData->mIrRate, rate);
-    for(fi = 0;fi < hData->mFdCount;fi++)
-    {
-        for(ei = hData->mFds[fi].mEvStart;ei < hData->mFds[fi].mEvCount;ei++)
+        /* Resampling from a lower rate to a higher rate. This likely only
+         * works properly when 1 <= scale <= 2.
+         */
+        void upsample(double *resampled, const double *ir) const
         {
-            for(ai = 0;ai < hData->mFds[fi].mEvs[ei].mAzCount;ai++)
+            std::fill_n(resampled, m, 0.0);
+            resampled[0] = ir[0];
+            for(size_t in{1};in < m;++in)
+            {
+                const auto offset = static_cast<double>(in) / scale;
+                const auto out = static_cast<size_t>(offset);
+
+                const double a{offset - static_cast<double>(out)};
+                if(out == m-1)
+                    resampled[out] += ir[in]*(1.0-a);
+                else
+                {
+                    resampled[out  ] += ir[in]*(1.0-a);
+                    resampled[out+1] += ir[in]*a;
+                }
+            }
+        }
+
+        /* Resampling from a higher rate to a lower rate. This likely only
+         * works properly when 0.5 <= scale <= 1.0.
+         */
+        void downsample(double *resampled, const double *ir) const
+        {
+            resampled[0] = ir[0];
+            for(size_t out{1};out < m;++out)
+            {
+                const auto offset = static_cast<double>(out) * scale;
+                const auto in = static_cast<size_t>(offset);
+
+                const double a{offset - static_cast<double>(in)};
+                if(in == m-1)
+                    resampled[out] = ir[in]*(1.0-a);
+                else
+                    resampled[out] = ir[in]*(1.0-a) + ir[in+1]*a;
+            }
+        }
+    };
+
+    while(rate > hData->mIrRate*2)
+        ResampleHrirs(hData->mIrRate*2, hData);
+    while(rate < (hData->mIrRate+1)/2)
+        ResampleHrirs((hData->mIrRate+1)/2, hData);
+
+    const auto scale = static_cast<double>(rate) / hData->mIrRate;
+    const size_t m{hData->mFftSize/2u + 1u};
+    auto resampled = std::vector<double>(m);
+
+    const Resampler resampler{scale, m};
+    auto do_resample = std::bind(
+        std::mem_fn((scale > 1.0) ? &Resampler::upsample : &Resampler::downsample), &resampler,
+        _1, _2);
+
+    const uint channels{(hData->mChannelType == CT_STEREO) ? 2u : 1u};
+    for(uint fi{0};fi < hData->mFdCount;++fi)
+    {
+        for(uint ei{hData->mFds[fi].mEvStart};ei < hData->mFds[fi].mEvCount;++ei)
+        {
+            for(uint ai{0};ai < hData->mFds[fi].mEvs[ei].mAzCount;++ai)
             {
                 HrirAzT *azd = &hData->mFds[fi].mEvs[ei].mAzs[ai];
-                for(ti = 0;ti < channels;ti++)
-                    ResamplerRun(&rs, n, azd->mIrs[ti], n, azd->mIrs[ti]);
+                for(uint ti{0};ti < channels;++ti)
+                {
+                    do_resample(resampled.data(), azd->mIrs[ti]);
+                    /* This should probably be rescaled according to the scale,
+                     * however it'll all be normalized in the end so a constant
+                     * scalar is fine to leave.
+                     */
+                    std::transform(resampled.cbegin(), resampled.cend(), azd->mIrs[ti],
+                        [](const double d) { return std::max(d, EPSILON); });
+                }
             }
         }
     }
@@ -1221,97 +928,219 @@ static void SynthesizeOnsets(HrirDataT *hData)
 
 /* Attempt to synthesize any missing HRIRs at the bottom elevations of each
  * field.  Right now this just blends the lowest elevation HRIRs together and
- * applies some attenuation and high frequency damping.  It is a simple, if
+ * applies a low-pass filter to simulate body occlusion.  It is a simple, if
  * inaccurate model.
  */
 static void SynthesizeHrirs(HrirDataT *hData)
 {
     const uint channels{(hData->mChannelType == CT_STEREO) ? 2u : 1u};
-    const uint irSize{hData->mIrPoints};
+    auto htemp = std::vector<complex_d>(hData->mFftSize);
+    const uint m{hData->mFftSize/2u + 1u};
+    auto filter = std::vector<double>(m);
     const double beta{3.5e-6 * hData->mIrRate};
 
-    auto proc_field = [channels,irSize,beta](HrirFdT &field) -> void
+    auto proc_field = [channels,m,beta,&htemp,&filter](HrirFdT &field) -> void
     {
         const uint oi{field.mEvStart};
         if(oi <= 0) return;
 
         for(uint ti{0u};ti < channels;ti++)
         {
-            for(uint i{0u};i < irSize;i++)
-                field.mEvs[0].mAzs[0].mIrs[ti][i] = 0.0;
-            /* Blend the lowest defined elevation's responses for an average
-             * -90 degree elevation response.
+            uint a0, a1;
+            double af;
+
+            /* Use the lowest immediate-left response for the left ear and
+             * lowest immediate-right response for the right ear. Given no comb
+             * effects as a result of the left response reaching the right ear
+             * and vice-versa, this produces a decent phantom-center response
+             * underneath the head.
              */
-            double blend_count{0.0};
-            for(uint ai{0u};ai < field.mEvs[oi].mAzCount;ai++)
+            CalcAzIndices(field, oi, ((ti==0) ? -M_PI : M_PI) / 2.0, &a0, &a1, &af);
+            for(uint i{0u};i < m;i++)
             {
-                /* Only include the left responses for the left ear, and the
-                 * right responses for the right ear. This removes the cross-
-                 * talk that shouldn't exist for the -90 degree elevation
-                 * response (and would be mistimed anyway). NOTE: Azimuth goes
-                 * from 0...2pi rather than -pi...+pi (0 in front, clockwise).
-                 */
-                if(std::abs(field.mEvs[oi].mAzs[ai].mAzimuth) < EPSILON ||
-                   (ti == LeftChannel && field.mEvs[oi].mAzs[ai].mAzimuth > M_PI-EPSILON) ||
-                   (ti == RightChannel && field.mEvs[oi].mAzs[ai].mAzimuth < M_PI+EPSILON))
-                {
-                    for(uint i{0u};i < irSize;i++)
-                        field.mEvs[0].mAzs[0].mIrs[ti][i] += field.mEvs[oi].mAzs[ai].mIrs[ti][i];
-                    blend_count += 1.0;
-                }
+                field.mEvs[0].mAzs[0].mIrs[ti][i] = Lerp(field.mEvs[oi].mAzs[a0].mIrs[ti][i],
+                    field.mEvs[oi].mAzs[a1].mIrs[ti][i], af);
             }
-            if(blend_count > 0.0)
+        }
+
+        for(uint ei{1u};ei < field.mEvStart;ei++)
+        {
+            const double of{static_cast<double>(ei) / field.mEvStart};
+            const double b{(1.0 - of) * beta};
+            double lp[4]{};
+
+            /* Calculate a low-pass filter to simulate body occlusion. */
+            lp[0] = Lerp(1.0, lp[0], b);
+            lp[1] = Lerp(lp[0], lp[1], b);
+            lp[2] = Lerp(lp[1], lp[2], b);
+            lp[3] = Lerp(lp[2], lp[3], b);
+            htemp[0] = lp[3];
+            for(size_t i{1u};i < htemp.size();i++)
             {
-                for(uint i{0u};i < irSize;i++)
-                    field.mEvs[0].mAzs[0].mIrs[ti][i] /= blend_count;
+                lp[0] = Lerp(0.0, lp[0], b);
+                lp[1] = Lerp(lp[0], lp[1], b);
+                lp[2] = Lerp(lp[1], lp[2], b);
+                lp[3] = Lerp(lp[2], lp[3], b);
+                htemp[i] = lp[3];
             }
+            /* Get the filter's frequency-domain response and extract the
+             * frequency magnitudes (phase will be reconstructed later)).
+             */
+            FftForward(static_cast<uint>(htemp.size()), htemp.data());
+            std::transform(htemp.cbegin(), htemp.cbegin()+m, filter.begin(),
+                [](const complex_d &c) -> double { return std::abs(c); });
 
-            for(uint ei{1u};ei < field.mEvStart;ei++)
+            for(uint ai{0u};ai < field.mEvs[ei].mAzCount;ai++)
             {
-                const double of{static_cast<double>(ei) / field.mEvStart};
-                const double b{(1.0 - of) * beta};
-                for(uint ai{0u};ai < field.mEvs[ei].mAzCount;ai++)
-                {
-                    uint a0, a1;
-                    double af;
+                uint a0, a1;
+                double af;
 
-                    CalcAzIndices(field, oi, field.mEvs[ei].mAzs[ai].mAzimuth, &a0, &a1, &af);
-                    double lp[4]{};
-                    for(uint i{0u};i < irSize;i++)
+                CalcAzIndices(field, oi, field.mEvs[ei].mAzs[ai].mAzimuth, &a0, &a1, &af);
+                for(uint ti{0u};ti < channels;ti++)
+                {
+                    for(uint i{0u};i < m;i++)
                     {
                         /* Blend the two defined HRIRs closest to this azimuth,
                          * then blend that with the synthesized -90 elevation.
                          */
                         const double s1{Lerp(field.mEvs[oi].mAzs[a0].mIrs[ti][i],
                             field.mEvs[oi].mAzs[a1].mIrs[ti][i], af)};
-                        const double s0{Lerp(field.mEvs[0].mAzs[0].mIrs[ti][i], s1, of)};
-                        /* Apply a low-pass to simulate body occlusion. */
-                        lp[0] = Lerp(s0, lp[0], b);
-                        lp[1] = Lerp(lp[0], lp[1], b);
-                        lp[2] = Lerp(lp[1], lp[2], b);
-                        lp[3] = Lerp(lp[2], lp[3], b);
-                        field.mEvs[ei].mAzs[ai].mIrs[ti][i] = lp[3];
+                        const double s{Lerp(field.mEvs[0].mAzs[0].mIrs[ti][i], s1, of)};
+                        field.mEvs[ei].mAzs[ai].mIrs[ti][i] = s * filter[i];
                     }
                 }
             }
-            const double b{beta};
-            double lp[4]{};
-            for(uint i{0u};i < irSize;i++)
-            {
-                const double s0{field.mEvs[0].mAzs[0].mIrs[ti][i]};
-                lp[0] = Lerp(s0, lp[0], b);
-                lp[1] = Lerp(lp[0], lp[1], b);
-                lp[2] = Lerp(lp[1], lp[2], b);
-                lp[3] = Lerp(lp[2], lp[3], b);
-                field.mEvs[0].mAzs[0].mIrs[ti][i] = lp[3];
-            }
         }
-        field.mEvStart = 0;
+        const double b{beta};
+        double lp[4]{};
+        lp[0] = Lerp(1.0, lp[0], b);
+        lp[1] = Lerp(lp[0], lp[1], b);
+        lp[2] = Lerp(lp[1], lp[2], b);
+        lp[3] = Lerp(lp[2], lp[3], b);
+        htemp[0] = lp[3];
+        for(size_t i{1u};i < htemp.size();i++)
+        {
+            lp[0] = Lerp(0.0, lp[0], b);
+            lp[1] = Lerp(lp[0], lp[1], b);
+            lp[2] = Lerp(lp[1], lp[2], b);
+            lp[3] = Lerp(lp[2], lp[3], b);
+            htemp[i] = lp[3];
+        }
+        FftForward(static_cast<uint>(htemp.size()), htemp.data());
+        std::transform(htemp.cbegin(), htemp.cbegin()+m, filter.begin(),
+            [](const complex_d &c) -> double { return std::abs(c); });
+
+        for(uint ti{0u};ti < channels;ti++)
+        {
+            for(uint i{0u};i < m;i++)
+                field.mEvs[0].mAzs[0].mIrs[ti][i] *= filter[i];
+        }
     };
     std::for_each(hData->mFds.begin(), hData->mFds.begin()+hData->mFdCount, proc_field);
 }
 
 // The following routines assume a full set of HRIRs for all elevations.
+
+/* Perform minimum-phase reconstruction using the magnitude responses of the
+ * HRIR set. Work is delegated to this struct, which runs asynchronously on one
+ * or more threads (sharing the same reconstructor object).
+ */
+struct HrirReconstructor {
+    std::vector<double*> mIrs;
+    std::atomic<size_t> mCurrent;
+    std::atomic<size_t> mDone;
+    uint mFftSize;
+    uint mIrPoints;
+
+    void Worker()
+    {
+        auto h = std::vector<complex_d>(mFftSize);
+        auto mags = std::vector<double>(mFftSize);
+        size_t m{(mFftSize/2) + 1};
+
+        while(1)
+        {
+            /* Load the current index to process. */
+            size_t idx{mCurrent.load()};
+            do {
+                /* If the index is at the end, we're done. */
+                if(idx >= mIrs.size())
+                    return;
+                /* Otherwise, increment the current index atomically so other
+                 * threads know to go to the next one. If this call fails, the
+                 * current index was just changed by another thread and the new
+                 * value is loaded into idx, which we'll recheck.
+                 */
+            } while(!mCurrent.compare_exchange_weak(idx, idx+1, std::memory_order_relaxed));
+
+            /* Now do the reconstruction, and apply the inverse FFT to get the
+             * time-domain response.
+             */
+            for(size_t i{0};i < m;++i)
+                mags[i] = std::max(mIrs[idx][i], EPSILON);
+            MinimumPhase(mFftSize, mags.data(), h.data());
+            FftInverse(mFftSize, h.data());
+            for(uint i{0u};i < mIrPoints;++i)
+                mIrs[idx][i] = h[i].real();
+
+            /* Increment the number of IRs done. */
+            mDone.fetch_add(1);
+        }
+    }
+};
+
+static void ReconstructHrirs(const HrirDataT *hData, const uint numThreads)
+{
+    const uint channels{(hData->mChannelType == CT_STEREO) ? 2u : 1u};
+
+    /* Set up the reconstructor with the needed size info and pointers to the
+     * IRs to process.
+     */
+    HrirReconstructor reconstructor;
+    reconstructor.mCurrent.store(0, std::memory_order_relaxed);
+    reconstructor.mDone.store(0, std::memory_order_relaxed);
+    reconstructor.mFftSize = hData->mFftSize;
+    reconstructor.mIrPoints = hData->mIrPoints;
+    for(uint fi{0u};fi < hData->mFdCount;fi++)
+    {
+        const HrirFdT &field = hData->mFds[fi];
+        for(uint ei{0};ei < field.mEvCount;ei++)
+        {
+            const HrirEvT &elev = field.mEvs[ei];
+            for(uint ai{0u};ai < elev.mAzCount;ai++)
+            {
+                const HrirAzT &azd = elev.mAzs[ai];
+                for(uint ti{0u};ti < channels;ti++)
+                    reconstructor.mIrs.push_back(azd.mIrs[ti]);
+            }
+        }
+    }
+
+    /* Launch threads to work on reconstruction. */
+    std::vector<std::thread> thrds;
+    thrds.reserve(numThreads);
+    for(size_t i{0};i < numThreads;++i)
+        thrds.emplace_back(std::mem_fn(&HrirReconstructor::Worker), &reconstructor);
+
+    /* Keep track of the number of IRs done, periodically reporting it. */
+    size_t count;
+    do {
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
+
+        count = reconstructor.mDone.load();
+        size_t pcdone{count * 100 / reconstructor.mIrs.size()};
+
+        printf("\r%3zu%% done (%zu of %zu)", pcdone, count, reconstructor.mIrs.size());
+        fflush(stdout);
+    } while(count < reconstructor.mIrs.size());
+    fputc('\n', stdout);
+
+    for(auto &thrd : thrds)
+    {
+        if(thrd.joinable())
+            thrd.join();
+    }
+}
 
 // Normalize the HRIR set and slightly attenuate the result.
 static void NormalizeHrirs(HrirDataT *hData)
@@ -1321,32 +1150,32 @@ static void NormalizeHrirs(HrirDataT *hData)
 
     /* Find the maximum amplitude and RMS out of all the IRs. */
     struct LevelPair { double amp, rms; };
-    auto proc0_field = [channels,irSize](const LevelPair levels, const HrirFdT &field) -> LevelPair
+    auto proc0_field = [channels,irSize](const LevelPair levels0, const HrirFdT &field) -> LevelPair
     {
-        auto proc_elev = [channels,irSize](const LevelPair levels, const HrirEvT &elev) -> LevelPair
+        auto proc_elev = [channels,irSize](const LevelPair levels1, const HrirEvT &elev) -> LevelPair
         {
-            auto proc_azi = [channels,irSize](const LevelPair levels, const HrirAzT &azi) -> LevelPair
+            auto proc_azi = [channels,irSize](const LevelPair levels2, const HrirAzT &azi) -> LevelPair
             {
-                auto proc_channel = [irSize](const LevelPair levels, const double *ir) -> LevelPair
+                auto proc_channel = [irSize](const LevelPair levels3, const double *ir) -> LevelPair
                 {
                     /* Calculate the peak amplitude and RMS of this IR. */
                     auto current = std::accumulate(ir, ir+irSize, LevelPair{0.0, 0.0},
-                        [](const LevelPair current, const double impulse) -> LevelPair
+                        [](const LevelPair cur, const double impulse) -> LevelPair
                         {
-                            return LevelPair{std::max(std::abs(impulse), current.amp),
-                                current.rms + impulse*impulse};
+                            return {std::max(std::abs(impulse), cur.amp),
+                                cur.rms + impulse*impulse};
                         });
                     current.rms = std::sqrt(current.rms / irSize);
 
                     /* Accumulate levels by taking the maximum amplitude and RMS. */
-                    return LevelPair{std::max(current.amp, levels.amp),
-                        std::max(current.rms, levels.rms)};
+                    return LevelPair{std::max(current.amp, levels3.amp),
+                        std::max(current.rms, levels3.rms)};
                 };
-                return std::accumulate(azi.mIrs, azi.mIrs+channels, levels, proc_channel);
+                return std::accumulate(azi.mIrs, azi.mIrs+channels, levels2, proc_channel);
             };
-            return std::accumulate(elev.mAzs, elev.mAzs+elev.mAzCount, levels, proc_azi);
+            return std::accumulate(elev.mAzs, elev.mAzs+elev.mAzCount, levels1, proc_azi);
         };
-        return std::accumulate(field.mEvs, field.mEvs+field.mEvCount, levels, proc_elev);
+        return std::accumulate(field.mEvs, field.mEvs+field.mEvCount, levels0, proc_elev);
     };
     const auto maxlev = std::accumulate(hData->mFds.begin(), hData->mFds.begin()+hData->mFdCount,
         LevelPair{0.0, 0.0}, proc0_field);
@@ -1444,6 +1273,7 @@ static void CalculateHrtds(const HeadModelT model, const double radius, HrirData
         }
     }
 
+    double maxHrtd{0.0};
     for(fi = 0;fi < hData->mFdCount;fi++)
     {
         double minHrtd{std::numeric_limits<double>::infinity()};
@@ -1460,10 +1290,32 @@ static void CalculateHrtds(const HeadModelT model, const double radius, HrirData
 
         for(ei = 0;ei < hData->mFds[fi].mEvCount;ei++)
         {
-            for(ti = 0;ti < channels;ti++)
+            for(ai = 0;ai < hData->mFds[fi].mEvs[ei].mAzCount;ai++)
+            {
+                HrirAzT *azd = &hData->mFds[fi].mEvs[ei].mAzs[ai];
+
+                for(ti = 0;ti < channels;ti++)
+                {
+                    azd->mDelays[ti] = (azd->mDelays[ti]-minHrtd) * hData->mIrRate;
+                    maxHrtd = std::max(maxHrtd, azd->mDelays[ti]);
+                }
+            }
+        }
+    }
+    if(maxHrtd > MAX_HRTD)
+    {
+        fprintf(stdout, "  Scaling for max delay of %f samples to %f\n...\n", maxHrtd, MAX_HRTD);
+        const double scale{MAX_HRTD / maxHrtd};
+        for(fi = 0;fi < hData->mFdCount;fi++)
+        {
+            for(ei = 0;ei < hData->mFds[fi].mEvCount;ei++)
             {
                 for(ai = 0;ai < hData->mFds[fi].mEvs[ei].mAzCount;ai++)
-                    hData->mFds[fi].mEvs[ei].mAzs[ai].mDelays[ti] -= minHrtd;
+                {
+                    HrirAzT *azd = &hData->mFds[fi].mEvs[ei].mAzs[ai];
+                    for(ti = 0;ti < channels;ti++)
+                        azd->mDelays[ti] *= scale;
+                }
             }
         }
     }
@@ -1528,64 +1380,60 @@ int PrepareHrirData(const uint fdCount, const double (&distances)[MAX_FD_COUNT],
  * resulting data set as desired.  If the input name is NULL it will read
  * from standard input.
  */
-static int ProcessDefinition(const char *inName, const uint outRate, const ChannelModeT chanMode, const uint fftSize, const int equalize, const int surface, const double limit, const uint truncSize, const HeadModelT model, const double radius, const char *outName)
+static int ProcessDefinition(const char *inName, const uint outRate, const ChannelModeT chanMode,
+    const bool farfield, const uint numThreads, const uint fftSize, const int equalize,
+    const int surface, const double limit, const uint truncSize, const HeadModelT model,
+    const double radius, const char *outName)
 {
-    char rateStr[8+1], expName[MAX_PATH_LEN];
-    char startbytes[4]{};
-    size_t startbytecount{0u};
     HrirDataT hData;
-    FILE *fp;
-    int ret;
 
+    fprintf(stdout, "Using %u thread%s.\n", numThreads, (numThreads==1)?"":"s");
     if(!inName)
     {
         inName = "stdin";
-        fp = stdin;
+        fprintf(stdout, "Reading HRIR definition from %s...\n", inName);
+        if(!LoadDefInput(std::cin, nullptr, 0, inName, fftSize, truncSize, chanMode, &hData))
+            return 0;
     }
     else
     {
-        fp = fopen(inName, "r");
-        if(fp == nullptr)
+        std::unique_ptr<al::ifstream> input{new al::ifstream{inName}};
+        if(!input->is_open())
         {
             fprintf(stderr, "Error: Could not open input file '%s'\n", inName);
             return 0;
         }
 
-        startbytecount = fread(startbytes, 1, sizeof(startbytes), fp);
-        if(startbytecount != sizeof(startbytes))
+        char startbytes[4]{};
+        input->read(startbytes, sizeof(startbytes));
+        std::streamsize startbytecount{input->gcount()};
+        if(startbytecount != sizeof(startbytes) || !input->good())
         {
-            fclose(fp);
             fprintf(stderr, "Error: Could not read input file '%s'\n", inName);
             return 0;
         }
 
-        if(startbytes[0] == '\x89' && startbytes[1] == 'H' && startbytes[2] == 'D' &&
-           startbytes[3] == 'F')
+        if(startbytes[0] == '\x89' && startbytes[1] == 'H' && startbytes[2] == 'D'
+            && startbytes[3] == 'F')
         {
-            fclose(fp);
-            fp = nullptr;
-
+            input = nullptr;
             fprintf(stdout, "Reading HRTF data from %s...\n", inName);
-            if(!LoadSofaFile(inName, fftSize, truncSize, chanMode, &hData))
+            if(!LoadSofaFile(inName, numThreads, fftSize, truncSize, chanMode, &hData))
                 return 0;
         }
-    }
-    if(fp != nullptr)
-    {
-        fprintf(stdout, "Reading HRIR definition from %s...\n", inName);
-        const bool success{LoadDefInput(fp, startbytes, startbytecount, inName, fftSize, truncSize,
-            chanMode, &hData)};
-        if(fp != stdin)
-            fclose(fp);
-        if(!success)
-            return 0;
+        else
+        {
+            fprintf(stdout, "Reading HRIR definition from %s...\n", inName);
+            if(!LoadDefInput(*input, startbytes, startbytecount, inName, fftSize, truncSize, chanMode, &hData))
+                return 0;
+        }
     }
 
     if(equalize)
     {
-        uint c = (hData.mChannelType == CT_STEREO) ? 2 : 1;
-        uint m = 1 + hData.mFftSize / 2;
-        std::vector<double> dfa(c * m);
+        uint c{(hData.mChannelType == CT_STEREO) ? 2u : 1u};
+        uint m{hData.mFftSize/2u + 1u};
+        auto dfa = std::vector<double>(c * m);
 
         if(hData.mFdCount > 1)
         {
@@ -1597,29 +1445,43 @@ static int ProcessDefinition(const char *inName, const uint outRate, const Chann
         fprintf(stdout, "Performing diffuse-field equalization...\n");
         DiffuseFieldEqualize(c, m, dfa.data(), &hData);
     }
-    fprintf(stdout, "Performing minimum phase reconstruction...\n");
-    ReconstructHrirs(&hData);
+    if(hData.mFds.size() > 1)
+    {
+        fprintf(stdout, "Sorting %zu fields...\n", hData.mFds.size());
+        std::sort(hData.mFds.begin(), hData.mFds.end(),
+            [](const HrirFdT &lhs, const HrirFdT &rhs) noexcept
+            { return lhs.mDistance < rhs.mDistance; });
+        if(farfield)
+        {
+            fprintf(stdout, "Clearing %zu near field%s...\n", hData.mFds.size()-1,
+                (hData.mFds.size()-1 != 1) ? "s" : "");
+            hData.mFds.erase(hData.mFds.cbegin(), hData.mFds.cend()-1);
+            hData.mFdCount = 1;
+        }
+    }
     if(outRate != 0 && outRate != hData.mIrRate)
     {
         fprintf(stdout, "Resampling HRIRs...\n");
         ResampleHrirs(outRate, &hData);
     }
-    fprintf(stdout, "Truncating minimum-phase HRIRs...\n");
-    hData.mIrPoints = truncSize;
     fprintf(stdout, "Synthesizing missing elevations...\n");
     if(model == HM_DATASET)
         SynthesizeOnsets(&hData);
     SynthesizeHrirs(&hData);
+    fprintf(stdout, "Performing minimum phase reconstruction...\n");
+    ReconstructHrirs(&hData, numThreads);
+    fprintf(stdout, "Truncating minimum-phase HRIRs...\n");
+    hData.mIrPoints = truncSize;
     fprintf(stdout, "Normalizing final HRIRs...\n");
     NormalizeHrirs(&hData);
     fprintf(stdout, "Calculating impulse delays...\n");
     CalculateHrtds(model, (radius > DEFAULT_CUSTOM_RADIUS) ? radius : hData.mRadius, &hData);
-    snprintf(rateStr, 8, "%u", hData.mIrRate);
-    StrSubst(outName, "%r", rateStr, MAX_PATH_LEN, expName);
-    fprintf(stdout, "Creating MHR data set %s...\n", expName);
-    ret = StoreMhr(&hData, expName);
 
-    return ret;
+    const auto rateStr = std::to_string(hData.mIrRate);
+    const auto expName = StrSubst({outName, strlen(outName)}, {"%r", 2},
+        {rateStr.data(), rateStr.size()});
+    fprintf(stdout, "Creating MHR data set %s...\n", expName.c_str());
+    return StoreMhr(&hData, expName.c_str());
 }
 
 static void PrintHelp(const char *argv0, FILE *ofile)
@@ -1630,6 +1492,8 @@ static void PrintHelp(const char *argv0, FILE *ofile)
     fprintf(ofile, "                 resample the HRIRs accordingly.\n");
     fprintf(ofile, " -m              Change the data set to mono, mirroring the left ear for the\n");
     fprintf(ofile, "                 right ear.\n");
+    fprintf(ofile, " -a              Change the data set to single field, using the farthest field.\n");
+    fprintf(ofile, " -j <threads>    Number of threads used to process HRIRs (default: 2).\n");
     fprintf(ofile, " -f <points>     Override the FFT window size (default: %u).\n", DEFAULT_FFTSIZE);
     fprintf(ofile, " -e {on|off}     Toggle diffuse-field equalization (default: %s).\n", (DEFAULT_EQUALIZE ? "on" : "off"));
     fprintf(ofile, " -s {on|off}     Toggle surface-weighted diffuse-field average (default: %s).\n", (DEFAULT_SURFACE ? "on" : "off"));
@@ -1654,12 +1518,12 @@ int main(int argc, char *argv[])
     char *end = nullptr;
     ChannelModeT chanMode;
     HeadModelT model;
+    uint numThreads;
     uint truncSize;
     double radius;
+    bool farfield;
     double limit;
     int opt;
-
-    GET_UNICODE_ARGS(&argc, &argv);
 
     if(argc < 2)
     {
@@ -1675,16 +1539,18 @@ int main(int argc, char *argv[])
     equalize = DEFAULT_EQUALIZE;
     surface = DEFAULT_SURFACE;
     limit = DEFAULT_LIMIT;
+    numThreads = 2;
     truncSize = DEFAULT_TRUNCSIZE;
     model = DEFAULT_HEAD_MODEL;
     radius = DEFAULT_CUSTOM_RADIUS;
+    farfield = false;
 
-    while((opt=getopt(argc, argv, "r:mf:e:s:l:w:d:c:e:i:o:h")) != -1)
+    while((opt=getopt(argc, argv, "r:maj:f:e:s:l:w:d:c:e:i:o:h")) != -1)
     {
         switch(opt)
         {
         case 'r':
-            outRate = strtoul(optarg, &end, 10);
+            outRate = static_cast<uint>(strtoul(optarg, &end, 10));
             if(end[0] != '\0' || outRate < MIN_RATE || outRate > MAX_RATE)
             {
                 fprintf(stderr, "\nError: Got unexpected value \"%s\" for option -%c, expected between %u to %u.\n", optarg, opt, MIN_RATE, MAX_RATE);
@@ -1696,8 +1562,23 @@ int main(int argc, char *argv[])
             chanMode = CM_ForceMono;
             break;
 
+        case 'a':
+            farfield = true;
+            break;
+
+        case 'j':
+            numThreads = static_cast<uint>(strtoul(optarg, &end, 10));
+            if(end[0] != '\0' || numThreads > 64)
+            {
+                fprintf(stderr, "\nError: Got unexpected value \"%s\" for option -%c, expected between %u to %u.\n", optarg, opt, 0, 64);
+                exit(EXIT_FAILURE);
+            }
+            if(numThreads == 0)
+                numThreads = std::thread::hardware_concurrency();
+            break;
+
         case 'f':
-            fftSize = strtoul(optarg, &end, 10);
+            fftSize = static_cast<uint>(strtoul(optarg, &end, 10));
             if(end[0] != '\0' || (fftSize&(fftSize-1)) || fftSize < MIN_FFTSIZE || fftSize > MAX_FFTSIZE)
             {
                 fprintf(stderr, "\nError: Got unexpected value \"%s\" for option -%c, expected a power-of-two between %u to %u.\n", optarg, opt, MIN_FFTSIZE, MAX_FFTSIZE);
@@ -1744,10 +1625,10 @@ int main(int argc, char *argv[])
             break;
 
         case 'w':
-            truncSize = strtoul(optarg, &end, 10);
-            if(end[0] != '\0' || truncSize < MIN_TRUNCSIZE || truncSize > MAX_TRUNCSIZE || (truncSize%MOD_TRUNCSIZE))
+            truncSize = static_cast<uint>(strtoul(optarg, &end, 10));
+            if(end[0] != '\0' || truncSize < MIN_TRUNCSIZE || truncSize > MAX_TRUNCSIZE)
             {
-                fprintf(stderr, "\nError: Got unexpected value \"%s\" for option -%c, expected multiple of %u between %u to %u.\n", optarg, opt, MOD_TRUNCSIZE, MIN_TRUNCSIZE, MAX_TRUNCSIZE);
+                fprintf(stderr, "\nError: Got unexpected value \"%s\" for option -%c, expected between %u to %u.\n", optarg, opt, MIN_TRUNCSIZE, MAX_TRUNCSIZE);
                 exit(EXIT_FAILURE);
             }
             break;
@@ -1791,8 +1672,8 @@ int main(int argc, char *argv[])
         }
     }
 
-    int ret = ProcessDefinition(inName, outRate, chanMode, fftSize, equalize, surface, limit,
-        truncSize, model, radius, outName);
+    int ret = ProcessDefinition(inName, outRate, chanMode, farfield, numThreads, fftSize, equalize,
+        surface, limit, truncSize, model, radius, outName);
     if(!ret) return -1;
     fprintf(stdout, "Operation completed.\n");
 

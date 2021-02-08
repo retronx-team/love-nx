@@ -34,23 +34,26 @@
 #include <errno.h>
 #include <poll.h>
 #include <math.h>
+#include <string.h>
 
 #include <thread>
 #include <functional>
 
 #include "alcmain.h"
+#include "albyte.h"
 #include "alu.h"
 #include "alconfig.h"
+#include "compat.h"
+#include "core/logging.h"
 #include "threads.h"
 #include "vector.h"
-#include "compat.h"
 
 #include <sys/audioio.h>
 
 
 namespace {
 
-constexpr ALCchar solaris_device[] = "Solaris Default";
+constexpr char solaris_device[] = "Solaris Default";
 
 std::string solaris_driver{"/dev/audio"};
 
@@ -61,14 +64,14 @@ struct SolarisBackend final : public BackendBase {
 
     int mixerProc();
 
-    ALCenum open(const ALCchar *name) override;
-    ALCboolean reset() override;
-    ALCboolean start() override;
+    void open(const char *name) override;
+    bool reset() override;
+    void start() override;
     void stop() override;
 
     int mFd{-1};
 
-    al::vector<ALubyte> mBuffer;
+    al::vector<al::byte> mBuffer;
 
     std::atomic<bool> mKillNow{true};
     std::thread mThread;
@@ -88,26 +91,23 @@ int SolarisBackend::mixerProc()
     SetRTPriority();
     althrd_setname(MIXER_THREAD_NAME);
 
-    const int frame_size{mDevice->frameSizeFromFmt()};
+    const size_t frame_step{mDevice->channelsFromFmt()};
+    const uint frame_size{mDevice->frameSizeFromFmt()};
 
-    lock();
-    while(!mKillNow.load(std::memory_order_acquire) &&
-          mDevice->Connected.load(std::memory_order_acquire))
+    while(!mKillNow.load(std::memory_order_acquire)
+        && mDevice->Connected.load(std::memory_order_acquire))
     {
         pollfd pollitem{};
         pollitem.fd = mFd;
         pollitem.events = POLLOUT;
 
-        unlock();
         int pret{poll(&pollitem, 1, 1000)};
-        lock();
         if(pret < 0)
         {
             if(errno == EINTR || errno == EAGAIN)
                 continue;
             ERR("poll failed: %s\n", strerror(errno));
-            aluHandleDisconnect(mDevice, "Failed to wait for playback buffer: %s",
-                strerror(errno));
+            mDevice->handleDisconnect("Failed to wait for playback buffer: %s", strerror(errno));
             break;
         }
         else if(pret == 0)
@@ -116,9 +116,9 @@ int SolarisBackend::mixerProc()
             continue;
         }
 
-        ALubyte *write_ptr{mBuffer.data()};
+        al::byte *write_ptr{mBuffer.data()};
         size_t to_write{mBuffer.size()};
-        aluMixData(mDevice, write_ptr, to_write/frame_size);
+        mDevice->renderSamples(write_ptr, static_cast<uint>(to_write/frame_size), frame_step);
         while(to_write > 0 && !mKillNow.load(std::memory_order_acquire))
         {
             ssize_t wrote{write(mFd, write_ptr, to_write)};
@@ -127,40 +127,36 @@ int SolarisBackend::mixerProc()
                 if(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
                     continue;
                 ERR("write failed: %s\n", strerror(errno));
-                aluHandleDisconnect(mDevice, "Failed to write playback samples: %s",
-                    strerror(errno));
+                mDevice->handleDisconnect("Failed to write playback samples: %s", strerror(errno));
                 break;
             }
 
-            to_write -= wrote;
+            to_write -= static_cast<size_t>(wrote);
             write_ptr += wrote;
         }
     }
-    unlock();
 
     return 0;
 }
 
 
-ALCenum SolarisBackend::open(const ALCchar *name)
+void SolarisBackend::open(const char *name)
 {
     if(!name)
         name = solaris_device;
     else if(strcmp(name, solaris_device) != 0)
-        return ALC_INVALID_VALUE;
+        throw al::backend_exception{al::backend_error::NoDevice, "Device name \"%s\" not found",
+            name};
 
     mFd = ::open(solaris_driver.c_str(), O_WRONLY);
     if(mFd == -1)
-    {
-        ERR("Could not open %s: %s\n", solaris_driver.c_str(), strerror(errno));
-        return ALC_INVALID_VALUE;
-    }
+        throw al::backend_exception{al::backend_error::NoDevice, "Could not open %s: %s",
+            solaris_driver.c_str(), strerror(errno)};
 
     mDevice->DeviceName = name;
-    return ALC_NO_ERROR;
 }
 
-ALCboolean SolarisBackend::reset()
+bool SolarisBackend::reset()
 {
     audio_info_t info;
     AUDIO_INITINFO(&info);
@@ -169,82 +165,83 @@ ALCboolean SolarisBackend::reset()
 
     if(mDevice->FmtChans != DevFmtMono)
         mDevice->FmtChans = DevFmtStereo;
-    ALsizei numChannels{mDevice->channelsFromFmt()};
+    uint numChannels{mDevice->channelsFromFmt()};
     info.play.channels = numChannels;
 
     switch(mDevice->FmtType)
     {
-        case DevFmtByte:
-            info.play.precision = 8;
-            info.play.encoding = AUDIO_ENCODING_LINEAR;
-            break;
-        case DevFmtUByte:
-            info.play.precision = 8;
-            info.play.encoding = AUDIO_ENCODING_LINEAR8;
-            break;
-        case DevFmtUShort:
-        case DevFmtInt:
-        case DevFmtUInt:
-        case DevFmtFloat:
-            mDevice->FmtType = DevFmtShort;
-            /* fall-through */
-        case DevFmtShort:
-            info.play.precision = 16;
-            info.play.encoding = AUDIO_ENCODING_LINEAR;
-            break;
+    case DevFmtByte:
+        info.play.precision = 8;
+        info.play.encoding = AUDIO_ENCODING_LINEAR;
+        break;
+    case DevFmtUByte:
+        info.play.precision = 8;
+        info.play.encoding = AUDIO_ENCODING_LINEAR8;
+        break;
+    case DevFmtUShort:
+    case DevFmtInt:
+    case DevFmtUInt:
+    case DevFmtFloat:
+        mDevice->FmtType = DevFmtShort;
+        /* fall-through */
+    case DevFmtShort:
+        info.play.precision = 16;
+        info.play.encoding = AUDIO_ENCODING_LINEAR;
+        break;
     }
 
-    ALsizei frameSize{numChannels * mDevice->bytesFromFmt()};
+    uint frameSize{numChannels * mDevice->bytesFromFmt()};
     info.play.buffer_size = mDevice->BufferSize * frameSize;
 
     if(ioctl(mFd, AUDIO_SETINFO, &info) < 0)
     {
         ERR("ioctl failed: %s\n", strerror(errno));
-        return ALC_FALSE;
+        return false;
     }
 
-    if(mDevice->channelsFromFmt() != (ALsizei)info.play.channels)
+    if(mDevice->channelsFromFmt() != info.play.channels)
     {
         ERR("Failed to set %s, got %u channels instead\n", DevFmtChannelsString(mDevice->FmtChans),
             info.play.channels);
-        return ALC_FALSE;
+        return false;
     }
 
-    if(!((info.play.precision == 8 && info.play.encoding == AUDIO_ENCODING_LINEAR8 && mDevice->FmtType == DevFmtUByte) ||
-         (info.play.precision == 8 && info.play.encoding == AUDIO_ENCODING_LINEAR && mDevice->FmtType == DevFmtByte) ||
-         (info.play.precision == 16 && info.play.encoding == AUDIO_ENCODING_LINEAR && mDevice->FmtType == DevFmtShort) ||
-         (info.play.precision == 32 && info.play.encoding == AUDIO_ENCODING_LINEAR && mDevice->FmtType == DevFmtInt)))
+    if(info.play.precision == 8 && info.play.encoding == AUDIO_ENCODING_LINEAR8)
+        mDevice->FmtType = DevFmtUByte;
+    else if(info.play.precision == 8 && info.play.encoding == AUDIO_ENCODING_LINEAR)
+        mDevice->FmtType = DevFmtByte;
+    else if(info.play.precision == 16 && info.play.encoding == AUDIO_ENCODING_LINEAR)
+        mDevice->FmtType = DevFmtShort;
+    else if(info.play.precision == 32 && info.play.encoding == AUDIO_ENCODING_LINEAR)
+        mDevice->FmtType = DevFmtInt;
+    else
     {
-        ERR("Could not set %s samples, got %d (0x%x)\n", DevFmtTypeString(mDevice->FmtType),
-            info.play.precision, info.play.encoding);
-        return ALC_FALSE;
+        ERR("Got unhandled sample type: %d (0x%x)\n", info.play.precision, info.play.encoding);
+        return false;
     }
 
     mDevice->Frequency = info.play.sample_rate;
     mDevice->BufferSize = info.play.buffer_size / frameSize;
     mDevice->UpdateSize = mDevice->BufferSize / 2;
 
-    SetDefaultChannelOrder(mDevice);
+    setDefaultChannelOrder();
 
     mBuffer.resize(mDevice->UpdateSize * mDevice->frameSizeFromFmt());
-    std::fill(mBuffer.begin(), mBuffer.end(), 0);
+    std::fill(mBuffer.begin(), mBuffer.end(), al::byte{});
 
-    return ALC_TRUE;
+    return true;
 }
 
-ALCboolean SolarisBackend::start()
+void SolarisBackend::start()
 {
     try {
         mKillNow.store(false, std::memory_order_release);
         mThread = std::thread{std::mem_fn(&SolarisBackend::mixerProc), this};
-        return ALC_TRUE;
     }
     catch(std::exception& e) {
-        ERR("Could not create playback thread: %s\n", e.what());
+        throw al::backend_exception{al::backend_error::DeviceError,
+            "Failed to start mixing thread: %s", e.what()};
     }
-    catch(...) {
-    }
-    return ALC_FALSE;
 }
 
 void SolarisBackend::stop()
@@ -275,23 +272,23 @@ bool SolarisBackendFactory::init()
 bool SolarisBackendFactory::querySupport(BackendType type)
 { return type == BackendType::Playback; }
 
-void SolarisBackendFactory::probe(DevProbe type, std::string *outnames)
+std::string SolarisBackendFactory::probe(BackendType type)
 {
+    std::string outnames;
     switch(type)
     {
-        case DevProbe::Playback:
-        {
-#ifdef HAVE_STAT
-            struct stat buf;
-            if(stat(solaris_driver.c_str(), &buf) == 0)
-#endif
-                outnames->append(solaris_device, sizeof(solaris_device));
-        }
-        break;
-
-        case DevProbe::Capture:
-            break;
+    case BackendType::Playback:
+    {
+        struct stat buf;
+        if(stat(solaris_driver.c_str(), &buf) == 0)
+            outnames.append(solaris_device, sizeof(solaris_device));
     }
+    break;
+
+    case BackendType::Capture:
+        break;
+    }
+    return outnames;
 }
 
 BackendPtr SolarisBackendFactory::createBackend(ALCdevice *device, BackendType type)

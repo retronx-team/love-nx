@@ -20,12 +20,15 @@
 
 #include "config.h"
 
+#include "opthelpers.h"
 #include "threads.h"
 
 #include <system_error>
 
 
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 #include <limits>
 
@@ -43,7 +46,7 @@ void althrd_setname(const char *name)
 #pragma pack(pop)
     info.dwType = 0x1000;
     info.szName = name;
-    info.dwThreadID = -1;
+    info.dwThreadID = ~DWORD{0};
     info.dwFlags = 0;
 
     __try {
@@ -73,15 +76,15 @@ semaphore::~semaphore()
 
 void semaphore::post()
 {
-    if(!ReleaseSemaphore(mSem, 1, nullptr))
+    if UNLIKELY(!ReleaseSemaphore(static_cast<HANDLE>(mSem), 1, nullptr))
         throw std::system_error(std::make_error_code(std::errc::value_too_large));
 }
 
 void semaphore::wait() noexcept
-{ WaitForSingleObject(mSem, INFINITE); }
+{ WaitForSingleObject(static_cast<HANDLE>(mSem), INFINITE); }
 
 bool semaphore::try_wait() noexcept
-{ return WaitForSingleObject(mSem, 0) == WAIT_OBJECT_0; }
+{ return WaitForSingleObject(static_cast<HANDLE>(mSem), 0) == WAIT_OBJECT_0; }
 
 } // namespace al
 
@@ -111,9 +114,9 @@ void althrd_setname(const char *name)
 void althrd_setname(const char*) { }
 #endif
 
-namespace al {
-
 #ifdef __APPLE__
+
+namespace al {
 
 semaphore::semaphore(unsigned int initial)
 {
@@ -134,9 +137,13 @@ void semaphore::wait() noexcept
 bool semaphore::try_wait() noexcept
 { return dispatch_semaphore_wait(mSem, DISPATCH_TIME_NOW) == 0; }
 
+} // namespace al
+
 #else /* !__APPLE__ */
 
 #include <cerrno>
+
+namespace al {
 
 semaphore::semaphore(unsigned int initial)
 {
@@ -162,8 +169,8 @@ void semaphore::wait() noexcept
 bool semaphore::try_wait() noexcept
 { return sem_trywait(&mSem) == 0; }
 
-#endif /* __APPLE__ */
-
 } // namespace al
+
+#endif /* __APPLE__ */
 
 #endif /* _WIN32 */

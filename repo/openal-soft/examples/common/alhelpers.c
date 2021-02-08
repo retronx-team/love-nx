@@ -36,6 +36,7 @@
 
 #include "AL/al.h"
 #include "AL/alc.h"
+#include "AL/alext.h"
 
 
 /* InitAL opens a device and sets up a context using default attributes, making
@@ -107,10 +108,18 @@ const char *FormatName(ALenum format)
 {
     switch(format)
     {
-        case AL_FORMAT_MONO8: return "Mono, U8";
-        case AL_FORMAT_MONO16: return "Mono, S16";
-        case AL_FORMAT_STEREO8: return "Stereo, U8";
-        case AL_FORMAT_STEREO16: return "Stereo, S16";
+    case AL_FORMAT_MONO8: return "Mono, U8";
+    case AL_FORMAT_MONO16: return "Mono, S16";
+    case AL_FORMAT_MONO_FLOAT32: return "Mono, Float32";
+    case AL_FORMAT_STEREO8: return "Stereo, U8";
+    case AL_FORMAT_STEREO16: return "Stereo, S16";
+    case AL_FORMAT_STEREO_FLOAT32: return "Stereo, Float32";
+    case AL_FORMAT_BFORMAT2D_8: return "B-Format 2D, U8";
+    case AL_FORMAT_BFORMAT2D_16: return "B-Format 2D, S16";
+    case AL_FORMAT_BFORMAT2D_FLOAT32: return "B-Format 2D, Float32";
+    case AL_FORMAT_BFORMAT3D_8: return "B-Format 3D, U8";
+    case AL_FORMAT_BFORMAT3D_16: return "B-Format 3D, S16";
+    case AL_FORMAT_BFORMAT3D_FLOAT32: return "B-Format 3D, Float32";
     }
     return "Unknown Format";
 }
@@ -159,12 +168,12 @@ int altime_get(void)
     struct timespec ts;
     int ret = clock_gettime(CLOCK_REALTIME, &ts);
     if(ret != 0) return 0;
-    cur_time = ts.tv_sec*1000 + ts.tv_nsec/1000000;
+    cur_time = (int)(ts.tv_sec*1000 + ts.tv_nsec/1000000);
 #else /* _POSIX_TIMERS > 0 */
     struct timeval tv;
     int ret = gettimeofday(&tv, NULL);
     if(ret != 0) return 0;
-    cur_time = tv.tv_sec*1000 + tv.tv_usec/1000;
+    cur_time = (int)(tv.tv_sec*1000 + tv.tv_usec/1000);
 #endif
 
     if(!start_time)
@@ -175,8 +184,8 @@ int altime_get(void)
 void al_nssleep(unsigned long nsec)
 {
     struct timespec ts, rem;
-    ts.tv_sec = nsec / 1000000000ul;
-    ts.tv_nsec = nsec % 1000000000ul;
+    ts.tv_sec = (time_t)(nsec / 1000000000ul);
+    ts.tv_nsec = (long)(nsec % 1000000000ul);
     while(nanosleep(&ts, &rem) == -1 && errno == EINTR)
         ts = rem;
 }

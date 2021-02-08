@@ -4,26 +4,29 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bitset>
 #include <chrono>
 #include <cstdint>
 #include <cstddef>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include "AL/al.h"
 #include "AL/alc.h"
 #include "AL/alext.h"
 
-#include "albyte.h"
 #include "almalloc.h"
 #include "alnumeric.h"
 #include "alspan.h"
-#include "ambidefs.h"
 #include "atomic.h"
-#include "devformat.h"
-#include "filters/splitter.h"
+#include "core/ambidefs.h"
+#include "core/bufferline.h"
+#include "core/devformat.h"
+#include "core/filters/splitter.h"
+#include "core/mixer/defs.h"
 #include "hrtf.h"
 #include "inprogext.h"
 #include "intrusive_ptr.h"
@@ -39,24 +42,36 @@ struct EffectState;
 struct Uhj2Encoder;
 struct bs2b;
 
+using uint = unsigned int;
+
 
 #define MIN_OUTPUT_RATE      8000
+#define MAX_OUTPUT_RATE      192000
 #define DEFAULT_OUTPUT_RATE  44100
+
 #define DEFAULT_UPDATE_SIZE  882 /* 20ms */
 #define DEFAULT_NUM_UPDATES  3
 
 
-enum DeviceType {
+enum class DeviceType : unsigned char {
     Playback,
     Capture,
     Loopback
 };
 
 
-enum RenderMode {
-    NormalRender,
-    StereoPair,
-    HrtfRender
+enum class RenderMode : unsigned char {
+    Normal,
+    Pairwise,
+    Hrtf
+};
+
+
+struct InputRemixMap {
+    struct TargetMix { Channel channel; float mix; };
+
+    Channel channel;
+    std::array<TargetMix,2> targets;
 };
 
 
@@ -109,69 +124,28 @@ struct FilterSubList {
 /* Maximum delay in samples for speaker distance compensation. */
 #define MAX_DELAY_LENGTH 1024
 
-class DistanceComp {
-public:
-    struct DistData {
-        ALfloat Gain{1.0f};
-        ALuint Length{0u}; /* Valid range is [0...MAX_DELAY_LENGTH). */
-        ALfloat *Buffer{nullptr};
+struct DistanceComp {
+    struct ChanData {
+        float Gain{1.0f};
+        uint Length{0u}; /* Valid range is [0...MAX_DELAY_LENGTH). */
+        float *Buffer{nullptr};
     };
 
-private:
-    std::array<DistData,MAX_OUTPUT_CHANNELS> mChannels;
-    al::vector<ALfloat,16> mSamples;
+    std::array<ChanData,MAX_OUTPUT_CHANNELS> mChannels;
+    al::FlexArray<float,16> mSamples;
 
-public:
-    void setSampleCount(size_t new_size) { mSamples.resize(new_size); }
-    void clear() noexcept
-    {
-        for(auto &chan : mChannels)
-        {
-            chan.Gain = 1.0f;
-            chan.Length = 0;
-            chan.Buffer = nullptr;
-        }
-        using SampleVecT = decltype(mSamples);
-        SampleVecT{}.swap(mSamples);
-    }
+    DistanceComp(size_t count) : mSamples{count} { }
 
-    ALfloat *getSamples() noexcept { return mSamples.data(); }
+    static std::unique_ptr<DistanceComp> Create(size_t numsamples)
+    { return std::unique_ptr<DistanceComp>{new(FamCount(numsamples)) DistanceComp{numsamples}}; }
 
-    al::span<DistData,MAX_OUTPUT_CHANNELS> as_span() { return mChannels; }
+    DEF_FAM_NEWDEL(DistanceComp, mSamples)
 };
+
 
 struct BFChannelConfig {
-    ALfloat Scale;
-    ALsizei Index;
-};
-
-/* Size for temporary storage of buffer data, in ALfloats. Larger values need
- * more memory, while smaller values may need more iterations. The value needs
- * to be a sensible size, however, as it constrains the max stepping value used
- * for mixing, as well as the maximum number of samples per mixing iteration.
- */
-#define BUFFERSIZE 1024
-
-using FloatBufferLine = std::array<float,BUFFERSIZE>;
-
-/* Maximum number of samples to pad on either end of a buffer for resampling.
- * Note that both the beginning and end need padding!
- */
-#define MAX_RESAMPLE_PADDING 24
-
-
-struct FrontStablizer {
-    static constexpr size_t DelayLength{256u};
-
-    alignas(16) float DelayBuf[MAX_OUTPUT_CHANNELS][DelayLength];
-
-    BandSplitter LFilter, RFilter;
-    alignas(16) float LSplit[2][BUFFERSIZE];
-    alignas(16) float RSplit[2][BUFFERSIZE];
-
-    alignas(16) float TempBuf[BUFFERSIZE + DelayLength];
-
-    DEF_NEWDEL(FrontStablizer)
+    float Scale;
+    uint Index;
 };
 
 
@@ -183,7 +157,8 @@ struct MixParams {
 };
 
 struct RealMixParams {
-    std::array<ALint,MaxChannels> ChannelIndex{};
+    al::span<const InputRemixMap> RemixMap;
+    std::array<uint,MaxChannels> ChannelIndex{};
 
     al::span<FloatBufferLine> Buffer;
 };
@@ -208,82 +183,61 @@ struct ALCdevice : public al::intrusive_ref<ALCdevice> {
     std::atomic<bool> Connected{true};
     const DeviceType Type{};
 
-    ALuint Frequency{};
-    ALuint UpdateSize{};
-    ALuint BufferSize{};
+    uint Frequency{};
+    uint UpdateSize{};
+    uint BufferSize{};
 
     DevFmtChannels FmtChans{};
-    DevFmtType     FmtType{};
-    ALboolean IsHeadphones{AL_FALSE};
-    ALsizei mAmbiOrder{0};
+    DevFmtType FmtType{};
+    bool IsHeadphones{false};
+    uint mAmbiOrder{0};
+    float mXOverFreq{400.0f};
     /* For DevFmtAmbi* output only, specifies the channel order and
      * normalization.
      */
-    AmbiLayout mAmbiLayout{AmbiLayout::Default};
-    AmbiNorm   mAmbiScale{AmbiNorm::Default};
-
-    ALCenum LimiterState{ALC_DONT_CARE_SOFT};
+    DevAmbiLayout mAmbiLayout{DevAmbiLayout::Default};
+    DevAmbiScaling mAmbiScale{DevAmbiScaling::Default};
 
     std::string DeviceName;
 
     // Device flags
-    al::bitfield<DeviceFlagsCount> Flags{};
-
-    std::string HrtfName;
-    al::vector<EnumeratedHrtf> HrtfList;
-    ALCenum HrtfStatus{ALC_FALSE};
-
-    std::atomic<ALCenum> LastError{ALC_NO_ERROR};
+    std::bitset<DeviceFlagsCount> Flags{};
 
     // Maximum number of sources that can be created
-    ALuint SourcesMax{};
+    uint SourcesMax{};
     // Maximum number of slots that can be created
-    ALuint AuxiliaryEffectSlotMax{};
-
-    ALCuint NumMonoSources{};
-    ALCuint NumStereoSources{};
-    ALsizei NumAuxSends{};
-
-    // Map of Buffers for this device
-    std::mutex BufferLock;
-    al::vector<BufferSubList> BufferList;
-
-    // Map of Effects for this device
-    std::mutex EffectLock;
-    al::vector<EffectSubList> EffectList;
-
-    // Map of Filters for this device
-    std::mutex FilterLock;
-    al::vector<FilterSubList> FilterList;
+    uint AuxiliaryEffectSlotMax{};
 
     /* Rendering mode. */
-    RenderMode mRenderMode{NormalRender};
+    RenderMode mRenderMode{RenderMode::Normal};
 
     /* The average speaker distance as determined by the ambdec configuration,
      * HRTF data set, or the NFC-HOA reference delay. Only used for NFC.
      */
-    ALfloat AvgSpeakerDist{0.0f};
+    float AvgSpeakerDist{0.0f};
 
-    ALuint SamplesDone{0u};
+    uint SamplesDone{0u};
     std::chrono::nanoseconds ClockBase{0};
     std::chrono::nanoseconds FixedLatency{0};
 
     /* Temp storage used for mixer processing. */
-    alignas(16) ALfloat SourceData[BUFFERSIZE + MAX_RESAMPLE_PADDING*2];
-    alignas(16) ALfloat ResampledData[BUFFERSIZE];
-    alignas(16) ALfloat FilteredData[BUFFERSIZE];
+    alignas(16) float SourceData[BufferLineSize + MaxResamplerPadding];
+    alignas(16) float ResampledData[BufferLineSize];
+    alignas(16) float FilteredData[BufferLineSize];
     union {
-        alignas(16) ALfloat HrtfSourceData[BUFFERSIZE + HRTF_HISTORY_LENGTH];
-        alignas(16) ALfloat NfcSampleData[BUFFERSIZE];
+        alignas(16) float HrtfSourceData[BufferLineSize + HrtfHistoryLength];
+        alignas(16) float NfcSampleData[BufferLineSize];
     };
-    alignas(16) float2 HrtfAccumData[BUFFERSIZE + HRIR_LENGTH];
+
+    /* Persistent storage for HRTF mixing. */
+    alignas(16) float2 HrtfAccumData[BufferLineSize + HrirLength + HrtfDirectDelay];
 
     /* Mixing buffer used by the Dry mix and Real output. */
     al::vector<FloatBufferLine, 16> MixBuffer;
 
     /* The "dry" path corresponds to the main output. */
     MixParams Dry;
-    ALuint NumChannelsPerOrder[MAX_AMBI_ORDER+1]{};
+    uint NumChannelsPerOrder[MaxAmbiOrder+1]{};
 
     /* "Real" output, which will be written to the device buffer. May alias the
      * dry buffer.
@@ -292,7 +246,8 @@ struct ALCdevice : public al::intrusive_ref<ALCdevice> {
 
     /* HRTF state and info */
     std::unique_ptr<DirectHrtfState> mHrtfState;
-    HrtfEntry *mHrtf{nullptr};
+    al::intrusive_ptr<HrtfStore> mHrtf;
+    uint mIrSize{0};
 
     /* Ambisonic-to-UHJ encoder */
     std::unique_ptr<Uhj2Encoder> Uhj_Encoder;
@@ -306,16 +261,14 @@ struct ALCdevice : public al::intrusive_ref<ALCdevice> {
     using PostProc = void(ALCdevice::*)(const size_t SamplesToDo);
     PostProc PostProcess{nullptr};
 
-    std::unique_ptr<FrontStablizer> Stablizer;
-
     std::unique_ptr<Compressor> Limiter;
 
     /* Delay buffers used to compensate for speaker distances. */
-    DistanceComp ChannelDelay;
+    std::unique_ptr<DistanceComp> ChannelDelays;
 
     /* Dithering control. */
-    ALfloat DitherDepth{0.0f};
-    ALuint DitherSeed{0u};
+    float DitherDepth{0.0f};
+    uint DitherSeed{0u};
 
     /* Running count of the mixer invocations, in 31.1 fixed point. This
      * actually increments *twice* when mixing, first at the start and then at
@@ -335,22 +288,61 @@ struct ALCdevice : public al::intrusive_ref<ALCdevice> {
     std::unique_ptr<BackendBase> Backend;
 
 
+    ALCuint NumMonoSources{};
+    ALCuint NumStereoSources{};
+    ALCuint NumAuxSends{};
+
+    std::string HrtfName;
+    al::vector<std::string> HrtfList;
+    ALCenum HrtfStatus{ALC_FALSE};
+
+    ALCenum LimiterState{ALC_DONT_CARE_SOFT};
+
+    std::atomic<ALCenum> LastError{ALC_NO_ERROR};
+
+    // Map of Buffers for this device
+    std::mutex BufferLock;
+    al::vector<BufferSubList> BufferList;
+
+    // Map of Effects for this device
+    std::mutex EffectLock;
+    al::vector<EffectSubList> EffectList;
+
+    // Map of Filters for this device
+    std::mutex FilterLock;
+    al::vector<FilterSubList> FilterList;
+
+
     ALCdevice(DeviceType type);
     ALCdevice(const ALCdevice&) = delete;
     ALCdevice& operator=(const ALCdevice&) = delete;
     ~ALCdevice();
 
-    ALsizei bytesFromFmt() const noexcept { return BytesFromDevFmt(FmtType); }
-    ALsizei channelsFromFmt() const noexcept { return ChannelsFromDevFmt(FmtChans, mAmbiOrder); }
-    ALsizei frameSizeFromFmt() const noexcept { return bytesFromFmt() * channelsFromFmt(); }
+    uint bytesFromFmt() const noexcept { return BytesFromDevFmt(FmtType); }
+    uint channelsFromFmt() const noexcept { return ChannelsFromDevFmt(FmtChans, mAmbiOrder); }
+    uint frameSizeFromFmt() const noexcept { return bytesFromFmt() * channelsFromFmt(); }
+
+    uint waitForMix() const noexcept
+    {
+        uint refcount;
+        while((refcount=MixCount.load(std::memory_order_acquire))&1) {
+        }
+        return refcount;
+    }
 
     void ProcessHrtf(const size_t SamplesToDo);
     void ProcessAmbiDec(const size_t SamplesToDo);
+    void ProcessAmbiDecStablized(const size_t SamplesToDo);
     void ProcessUhj(const size_t SamplesToDo);
     void ProcessBs2b(const size_t SamplesToDo);
 
     inline void postProcess(const size_t SamplesToDo)
     { if LIKELY(PostProcess) (this->*PostProcess)(SamplesToDo); }
+
+    void renderSamples(void *outBuffer, const uint numSamples, const size_t frameStep);
+
+    /* Caller must lock the device state, and the mixer must not be running. */
+    [[gnu::format(printf,2,3)]] void handleDisconnect(const char *msg, ...);
 
     DEF_NEWDEL(ALCdevice)
 };
@@ -362,23 +354,16 @@ struct ALCdevice : public al::intrusive_ref<ALCdevice> {
 #define RECORD_THREAD_NAME "alsoft-record"
 
 
-extern ALint RTPrioLevel;
+extern int RTPrioLevel;
 void SetRTPriority(void);
 
-void SetDefaultChannelOrder(ALCdevice *device);
-void SetDefaultWFXChannelOrder(ALCdevice *device);
-
-const ALCchar *DevFmtTypeString(DevFmtType type) noexcept;
-const ALCchar *DevFmtChannelsString(DevFmtChannels chans) noexcept;
-
 /**
- * GetChannelIdxByName
- *
- * Returns the index for the given channel name (e.g. FrontCenter), or -1 if it
- * doesn't exist.
+ * Returns the index for the given channel name (e.g. FrontCenter), or
+ * INVALID_CHANNEL_INDEX if it doesn't exist.
  */
-inline ALint GetChannelIdxByName(const RealMixParams &real, Channel chan) noexcept
+inline uint GetChannelIdxByName(const RealMixParams &real, Channel chan) noexcept
 { return real.ChannelIndex[chan]; }
+#define INVALID_CHANNEL_INDEX ~0u
 
 
 al::vector<std::string> SearchDataFiles(const char *match, const char *subdir);
