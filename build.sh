@@ -63,22 +63,12 @@ switch_cmake "$ROOT_DIR/repo/openal-soft" \
 	-DALSOFT_BACKEND_SDL2:BOOL=ON
 make #-j$JOBS
 
-echo "** physfs **"
-
-mkdir -p "$BUILD_DIR/physfs"
-cd "$BUILD_DIR/physfs"
-switch_cmake \
-	-DPHYSFS_BUILD_SHARED=OFF -DPHYSFS_BUILD_TEST=OFF \
-	"$ROOT_DIR/repo/physfs"
-make -j$JOBS
-CFLAGS="$CFLAGS -I$ROOT_DIR/repo/physfs/src"
-
 echo "** LÖVE **"
 
 mkdir -p "$BUILD_DIR/love"
 cd "$BUILD_DIR/love"
 switch_cmake \
-	-DPHYSFS_LIBRARY="$BUILD_DIR/physfs/libphysfs.a" \
+	-DPHYSFS_LIBRARY="$PORTLIBS_PREFIX/lib/libphysfs.a" \
 	-DOPENAL_LIBRARY="$BUILD_DIR/openal-soft/libopenal.a" \
 	-DOPENAL_INCLUDE_DIR="$ROOT_DIR/repo/openal-soft/include" \
 	-DLUAJIT_LIBRARY="$BUILD_DIR/luajit/src/libluajit.a" \
