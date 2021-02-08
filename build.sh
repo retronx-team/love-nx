@@ -24,6 +24,8 @@ echo "** env **"
 
 source "$DEVKITPRO/switchvars.sh"
 CFLAGS="$CFLAGS -g -I$PORTLIBS_PREFIX/include -D__SWITCH__ -I$DEVKITPRO/libnx/include"
+export SDL2DIR="$PORTLIBS_PREFIX"
+
 function switch_cmake() {
 	cmake -G"Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/switch.cmake" \
 		-DNX=1 \

@@ -40,7 +40,7 @@ if(MSVC)
 	set(LOVE_CONSOLE_EXE_NAME lovec)
 endif()
 
-if(CMAKE_SIZEOF_VOID_P EQUAL 8 OR SWITCH_LIBNX)
+if(CMAKE_SIZEOF_VOID_P EQUAL 8 OR NX)
 	set(LOVE_X64 TRUE)
 	set(LOVE_TARGET_PLATFORM x64)
 else()
@@ -174,7 +174,7 @@ Please see http://bitbucket.org/rude/megasource
 	find_package(Freetype REQUIRED)
 	find_package(ModPlug REQUIRED)
 	find_package(OpenAL REQUIRED)
-if(SWITCH_LIBNX)
+if(NX)
 	set(OPENGL_gl_LIBRARY "")
 else()
 	find_package(OpenGL REQUIRED)
@@ -323,7 +323,7 @@ if (APPLE)
 	)
 endif()
 
-if (SWITCH_LIBNX)
+if (NX)
 	set(LOVE_SRC_COMMON ${LOVE_SRC_COMMON}
 		src/common/nx.cpp
 	)
@@ -1514,7 +1514,7 @@ if(MSVC)
 		${LOVE_LINK_L3P_LUASOCKET_LIBLUASOCKET}
 		ws2_32.lib
 	)
-elseif(SWITCH_LIBNX)
+elseif(NX)
 	set(LOVE_SRC_3P_LUASOCKET_LIBLUASOCKET
 		${LOVE_SRC_3P_LUASOCKET_LIBLUASOCKET}
 		src/libraries/luasocket/libluasocket/usocket.c
@@ -1626,7 +1626,7 @@ if(APPLE)
 	)
 endif()
 
-if(NOT SWITCH_LIBNX)
+if(NOT NX)
 	add_library(love_3p_physfs ${LOVE_SRC_3P_PHYSFS})
 endif()
 
@@ -1713,7 +1713,7 @@ set(LOVE_3P
 	love_3p_xxhash
 )
 
-if(SWITCH_LIBNX)
+if(NX)
 	if(DEFINED PHYSFS_LIBRARY)
 		set(LOVE_3P ${LOVE_3P} ${PHYSFS_LIBRARY})
 	else()
@@ -1776,7 +1776,7 @@ if(MSVC)
 	)
 endif()
 
-if(SWITCH_LIBNX)
+if(NX)
 	add_library(${LOVE_LIB_NAME} STATIC ${LOVE_LIB_SRC} ${LOVE_RC})
 	set(LOVE_3P ${LOVE_3P} vorbis vorbisidec ogg bz2 png16 EGL glapi drm_nouveau nx)
 else()
