@@ -13,17 +13,10 @@ if [[ -z "$JOBS" ]]; then
 	JOBS="$(nproc --all)"
 fi
 
-echo "** native openal-soft tools **"
-
-mkdir -p "$BUILD_DIR/openal-soft-tools"
-cd "$BUILD_DIR/openal-soft-tools"
-cmake -G"Unix Makefiles" "$ROOT_DIR/repo/openal-soft/native-tools"
-make -j$JOBS
-
 echo "** env **"
 
 source "$DEVKITPRO/switchvars.sh"
-CFLAGS="$CFLAGS -g -I$PORTLIBS_PREFIX/include -D__SWITCH__ -I$DEVKITPRO/libnx/include"
+CFLAGS="$CFLAGS -g -I$PORTLIBS_PREFIX/include  -I$PORTLIBS_PREFIX/include/SDL2 -D__SWITCH__ -I$DEVKITPRO/libnx/include"
 export SDL2DIR="$PORTLIBS_PREFIX"
 
 function switch_cmake() {
@@ -61,7 +54,8 @@ switch_cmake "$ROOT_DIR/repo/openal-soft" \
 	-DALSOFT_REQUIRE_SDL2:BOOL=ON \
 	-DALSOFT_BACKEND_WAVE:BOOL=OFF \
 	-DALSOFT_BACKEND_SDL2:BOOL=ON
-make #-j$JOBS
+
+make -j$JOBS
 
 echo "** LÖVE **"
 
