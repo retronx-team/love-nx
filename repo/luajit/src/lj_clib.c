@@ -119,12 +119,17 @@ static void *clib_loadlib(lua_State *L, const char *name, int global)
 		   RTLD_LAZY | (global?RTLD_GLOBAL:RTLD_LOCAL));
   if (!h) {
     const char *e, *err = dlerror();
-    if (*err == '/' && (e = strchr(err, ':')) &&
+    /* Per the standard definition of `dlerror`, this should always be safe, but we have
+     * observed `dlerror()` returning NULL on Android 7.1.1 SDK 25 (Oculus Quest) anyway,
+     * which causes a crash. */
+    if (err && *err == '/' && (e = strchr(err, ':')) &&
 	(name = clib_resolve_lds(L, strdata(lj_str_new(L, err, e-err))))) {
       h = dlopen(name, RTLD_LAZY | (global?RTLD_GLOBAL:RTLD_LOCAL));
       if (h) return h;
       err = dlerror();
     }
+    if (!err) /* Tolerate nonstandard dlerror implementations */
+      err = "Unknown dlopen error";
     lj_err_callermsg(L, err);
   }
   return h;
@@ -349,7 +354,8 @@ TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
       lj_err_callerv(L, LJ_ERR_FFI_NODECL, strdata(name));
     if (ctype_isconstval(ct->info)) {
       CType *ctt = ctype_child(cts, ct);
-      lua_assert(ctype_isinteger(ctt->info) && ctt->size <= 4);
+      lj_assertCTS(ctype_isinteger(ctt->info) && ctt->size <= 4,
+		   "only 32 bit const supported");  /* NYI */
       if ((ctt->info & CTF_UNSIGNED) && (int32_t)ct->size < 0)
 	setnumV(tv, (lua_Number)(uint32_t)ct->size);
       else
@@ -361,7 +367,8 @@ TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
 #endif
       void *p = clib_getsym(cl, sym);
       GCcdata *cd;
-      lua_assert(ctype_isfunc(ct->info) || ctype_isextern(ct->info));
+      lj_assertCTS(ctype_isfunc(ct->info) || ctype_isextern(ct->info),
+		   "unexpected ctype %08x in clib", ct->info);
 #if LJ_TARGET_X86 && LJ_ABI_WIN
       /* Retry with decorated name for fastcall/stdcall functions. */
       if (!p && ctype_isfunc(ct->info)) {

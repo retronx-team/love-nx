@@ -41,7 +41,7 @@
 
 -- Cache some library functions and objects.
 local jit = require("jit")
-assert(jit.version_num == 20100, "LuaJIT core/library version mismatch")
+assert(jit.version_num == 20200, "moonjit core/library version mismatch")
 local jutil = require("jit.util")
 local vmdef = require("jit.vmdef")
 local bit = require("bit")
@@ -151,7 +151,7 @@ local function bcdump(func, out, all, lineinfo)
       kc = format(#kc > 40 and '"%.40s"~' or '"%s"', gsub(kc, "%c", ctlsub))
       out:write(format("KGC    %d    %s\n", -(n + 1), kc))
     elseif typ == "proto" then
-      local fi = funcinfo(kc)
+      fi = funcinfo(kc)
       if fi.ffid then
 	kc = vmdef.ffnames[fi.ffid]
       else

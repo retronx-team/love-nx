@@ -8,6 +8,8 @@
 
 #include "lua.h"
 
+/* -- Target definitions -------------------------------------------------- */
+
 /* Target endianess. */
 #define LUAJIT_LE	0
 #define LUAJIT_BE	1
@@ -39,6 +41,16 @@
 #define LUAJIT_OS_OSX		3
 #define LUAJIT_OS_BSD		4
 #define LUAJIT_OS_POSIX		5
+
+#define LJ_HAS_OPTIMISED_HASH	0
+
+/* Number mode. */
+#define LJ_NUMMODE_SINGLE	0	/* Single-number mode only. */
+#define LJ_NUMMODE_SINGLE_DUAL	1	/* Default to single-number mode. */
+#define LJ_NUMMODE_DUAL		2	/* Dual-number mode only. */
+#define LJ_NUMMODE_DUAL_SINGLE	3	/* Default to dual-number mode. */
+
+/* -- Target detection ---------------------------------------------------- */
 
 /* Select native target if no target defined. */
 #ifndef LUAJIT_TARGET
@@ -73,12 +85,16 @@
 #elif defined(__linux__)
 #define LUAJIT_OS	LUAJIT_OS_LINUX
 #elif defined(__MACH__) && defined(__APPLE__)
+#include "TargetConditionals.h"
 #define LUAJIT_OS	LUAJIT_OS_OSX
 #elif (defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || \
        defined(__NetBSD__) || defined(__OpenBSD__) || \
        defined(__DragonFly__)) && !defined(__ORBIS__)
 #define LUAJIT_OS	LUAJIT_OS_BSD
-#elif (defined(__sun__) && defined(__svr4__)) || defined(__HAIKU__)
+#elif (defined(__sun__) && defined(__svr4__))
+#define LJ_TARGET_SOLARIS	1
+#define LUAJIT_OS	LUAJIT_OS_POSIX
+#elif defined(__HAIKU__)
 #define LUAJIT_OS	LUAJIT_OS_POSIX
 #elif defined(__CYGWIN__)
 #define LJ_TARGET_CYGWIN	1
@@ -107,9 +123,15 @@
 #define LJ_TARGET_WINDOWS	(LUAJIT_OS == LUAJIT_OS_WINDOWS)
 #define LJ_TARGET_LINUX		(LUAJIT_OS == LUAJIT_OS_LINUX)
 #define LJ_TARGET_OSX		(LUAJIT_OS == LUAJIT_OS_OSX)
-#define LJ_TARGET_IOS		(LJ_TARGET_OSX && (LUAJIT_TARGET == LUAJIT_ARCH_ARM || LUAJIT_TARGET == LUAJIT_ARCH_ARM64))
+#define LJ_TARGET_BSD		(LUAJIT_OS == LUAJIT_OS_BSD)
 #define LJ_TARGET_POSIX		(LUAJIT_OS > LUAJIT_OS_WINDOWS)
 #define LJ_TARGET_DLOPEN	LJ_TARGET_POSIX
+
+#if TARGET_OS_IPHONE
+#define LJ_TARGET_IOS		1
+#else
+#define LJ_TARGET_IOS		0
+#endif
 
 #ifdef __CELLOS_LV2__
 #define LJ_TARGET_PS3		1
@@ -146,10 +168,7 @@
 #endif
 #endif
 
-#define LJ_NUMMODE_SINGLE	0	/* Single-number mode only. */
-#define LJ_NUMMODE_SINGLE_DUAL	1	/* Default to single-number mode. */
-#define LJ_NUMMODE_DUAL		2	/* Dual-number mode only. */
-#define LJ_NUMMODE_DUAL_SINGLE	3	/* Default to dual-number mode. */
+/* -- Arch-specific settings ---------------------------------------------- */
 
 /* Set target architecture properties. */
 #if LUAJIT_TARGET == LUAJIT_ARCH_X86
@@ -191,6 +210,10 @@
 #ifdef LUAJIT_ENABLE_GC64
 #define LJ_TARGET_GC64		1
 #endif
+#if defined(__GNUC__) || defined(_MSC_VER)
+#undef LJ_HAS_OPTIMISED_HASH
+#define LJ_HAS_OPTIMISED_HASH	LUAJIT_ENABLE_OPTIMISED_HASH
+#endif
 
 #elif LUAJIT_TARGET == LUAJIT_ARCH_ARM
 
@@ -212,13 +235,13 @@
 #define LJ_TARGET_UNIFYROT	2	/* Want only IR_BROR. */
 #define LJ_ARCH_NUMMODE		LJ_NUMMODE_DUAL
 
-#if __ARM_ARCH_8__ || __ARM_ARCH_8A__
+#if __ARM_ARCH == 8 || __ARM_ARCH_8__ || __ARM_ARCH_8A__
 #define LJ_ARCH_VERSION		80
-#elif __ARM_ARCH_7__ || __ARM_ARCH_7A__ || __ARM_ARCH_7R__ || __ARM_ARCH_7S__ || __ARM_ARCH_7VE__
+#elif __ARM_ARCH == 7 || __ARM_ARCH_7__ || __ARM_ARCH_7A__ || __ARM_ARCH_7R__ || __ARM_ARCH_7S__ || __ARM_ARCH_7VE__
 #define LJ_ARCH_VERSION		70
 #elif __ARM_ARCH_6T2__
 #define LJ_ARCH_VERSION		61
-#elif __ARM_ARCH_6__ || __ARM_ARCH_6J__ || __ARM_ARCH_6K__ || __ARM_ARCH_6Z__ || __ARM_ARCH_6ZK__
+#elif __ARM_ARCH == 6 || __ARM_ARCH_6__ || __ARM_ARCH_6J__ || __ARM_ARCH_6K__ || __ARM_ARCH_6Z__ || __ARM_ARCH_6ZK__
 #define LJ_ARCH_VERSION		60
 #else
 #define LJ_ARCH_VERSION		50
@@ -342,17 +365,37 @@
 #elif LUAJIT_TARGET == LUAJIT_ARCH_MIPS32 || LUAJIT_TARGET == LUAJIT_ARCH_MIPS64
 
 #if defined(__MIPSEL__) || defined(__MIPSEL) || defined(_MIPSEL)
+#if __mips_isa_rev >= 6
+#define LJ_TARGET_MIPSR6	1
+#define LJ_TARGET_UNALIGNED	1
+#endif
 #if LUAJIT_TARGET == LUAJIT_ARCH_MIPS32
+#if LJ_TARGET_MIPSR6
+#define LJ_ARCH_NAME		"mips32r6el"
+#else
 #define LJ_ARCH_NAME		"mipsel"
+#endif
+#else
+#if LJ_TARGET_MIPSR6
+#define LJ_ARCH_NAME		"mips64r6el"
 #else
 #define LJ_ARCH_NAME		"mips64el"
+#endif
 #endif
 #define LJ_ARCH_ENDIAN		LUAJIT_LE
 #else
 #if LUAJIT_TARGET == LUAJIT_ARCH_MIPS32
+#if LJ_TARGET_MIPSR6
+#define LJ_ARCH_NAME		"mips32r6"
+#else
 #define LJ_ARCH_NAME		"mips"
+#endif
+#else
+#if LJ_TARGET_MIPSR6
+#define LJ_ARCH_NAME		"mips64r6"
 #else
 #define LJ_ARCH_NAME		"mips64"
+#endif
 #endif
 #define LJ_ARCH_ENDIAN		LUAJIT_BE
 #endif
@@ -389,7 +432,9 @@
 #define LJ_TARGET_UNIFYROT	2	/* Want only IR_BROR. */
 #define LJ_ARCH_NUMMODE		LJ_NUMMODE_DUAL
 
-#if _MIPS_ARCH_MIPS32R2 || _MIPS_ARCH_MIPS64R2
+#if LJ_TARGET_MIPSR6
+#define LJ_ARCH_VERSION		60
+#elif _MIPS_ARCH_MIPS32R2 || _MIPS_ARCH_MIPS64R2
 #define LJ_ARCH_VERSION		20
 #else
 #define LJ_ARCH_VERSION		10
@@ -414,9 +459,7 @@
 #error "No target architecture defined"
 #endif
 
-#ifndef LJ_PAGESIZE
-#define LJ_PAGESIZE		4096
-#endif
+/* -- Checks for requirements --------------------------------------------- */
 
 /* Check for minimum required compiler versions. */
 #if defined(__GNUC__)
@@ -477,12 +520,19 @@
 #if !((defined(_MIPS_SIM_ABI32) && _MIPS_SIM == _MIPS_SIM_ABI32) || (defined(_ABIO32) && _MIPS_SIM == _ABIO32))
 #error "Only o32 ABI supported for MIPS32"
 #endif
+#if LJ_TARGET_MIPSR6
+/* Not that useful, since most available r6 CPUs are 64 bit. */
+#error "No support for MIPS32R6"
+#endif
 #elif LJ_TARGET_MIPS64
 #if !((defined(_MIPS_SIM_ABI64) && _MIPS_SIM == _MIPS_SIM_ABI64) || (defined(_ABI64) && _MIPS_SIM == _ABI64))
+/* MIPS32ON64 aka n32 ABI support might be desirable, but difficult. */
 #error "Only n64 ABI supported for MIPS64"
 #endif
 #endif
 #endif
+
+/* -- Derived defines ----------------------------------------------------- */
 
 /* Enable or disable the dual-number mode for the VM. */
 #if (LJ_ARCH_NUMMODE == LJ_NUMMODE_SINGLE && LUAJIT_NUMMODE == 2) || \
@@ -581,12 +631,13 @@
 #define LJ_TARGET_UNALIGNED	0
 #endif
 
+#ifndef LJ_PAGESIZE
+#define LJ_PAGESIZE		4096
+#endif
+
 /* Various workarounds for embedded operating systems or weak C runtimes. */
 #if defined(__ANDROID__) || defined(__symbian__) || LJ_TARGET_XBOX360 || LJ_TARGET_WINDOWS
 #define LUAJIT_NO_LOG2
-#endif
-#if defined(__symbian__) || LJ_TARGET_WINDOWS
-#define LUAJIT_NO_EXP2
 #endif
 #if LJ_TARGET_CONSOLE || (LJ_TARGET_IOS && __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_8_0)
 #define LJ_NO_SYSTEM		1

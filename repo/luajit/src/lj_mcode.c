@@ -44,7 +44,7 @@ void lj_mcode_sync(void *start, void *end)
   sys_icache_invalidate(start, (char *)end-(char *)start);
 #elif LJ_TARGET_PPC
   lj_vm_cachesync(start, end);
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) || defined(__clang__)
   __clear_cache(start, end);
 #else
 #error "Missing builtin to flush instruction cache"
@@ -351,7 +351,7 @@ MCode *lj_mcode_patch(jit_State *J, MCode *ptr, int finish)
     /* Otherwise search through the list of MCode areas. */
     for (;;) {
       mc = ((MCLink *)mc)->next;
-      lua_assert(mc != NULL);
+      lj_assertJ(mc != NULL, "broken MCode area chain");
       if (ptr >= mc && ptr < (MCode *)((char *)mc + ((MCLink *)mc)->size)) {
 	if (LJ_UNLIKELY(mcode_setprot(mc, ((MCLink *)mc)->size, MCPROT_GEN)))
 	  mcode_protfail(J);

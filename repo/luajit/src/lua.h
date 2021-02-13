@@ -103,6 +103,8 @@ typedef LUA_NUMBER lua_Number;
 /* type for integer functions */
 typedef LUA_INTEGER lua_Integer;
 
+/* unsigned integer type */
+typedef unsigned long lua_Unsigned;
 
 
 /*
@@ -263,7 +265,7 @@ LUA_API void *lua_getexdata(lua_State *L);
 
 #define lua_pushcfunction(L,f)	lua_pushcclosure(L, (f), 0)
 
-#define lua_strlen(L,i)		lua_objlen(L, (i))
+#define lua_strlen(L,i)		lua_rawlen(L, (i))
 
 #define lua_isfunction(L,n)	(lua_type(L, (n)) == LUA_TFUNCTION)
 #define lua_istable(L,n)	(lua_type(L, (n)) == LUA_TTABLE)
@@ -282,6 +284,8 @@ LUA_API void *lua_getexdata(lua_State *L);
 
 #define lua_tostring(L,i)	lua_tolstring(L, (i), NULL)
 
+/* From Lua 5.2. */
+#define lua_pushglobaltable(L)	lua_pushvalue(L, LUA_GLOBALSINDEX)
 
 
 /*
@@ -354,6 +358,10 @@ LUA_API const lua_Number *lua_version (lua_State *L);
 LUA_API void lua_copy (lua_State *L, int fromidx, int toidx);
 LUA_API lua_Number lua_tonumberx (lua_State *L, int idx, int *isnum);
 LUA_API lua_Integer lua_tointegerx (lua_State *L, int idx, int *isnum);
+LUA_API size_t lua_rawlen (lua_State *L, int idx);
+LUA_API void lua_len (lua_State *L, int idx);
+LUA_API int lua_absindex (lua_State *L, int idx);
+LUA_API void luaL_requiref (lua_State *L, char const* modname, lua_CFunction openf, int glb);
 
 /* From Lua 5.3. */
 LUA_API int lua_isyieldable (lua_State *L);

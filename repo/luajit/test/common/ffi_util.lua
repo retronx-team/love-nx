@@ -3,8 +3,9 @@
 -- functionality turned off, if the FFI module is not built-in.
 
 local ffi = require("ffi")
+local ffi_util = {}
 
-function checkfail(t, f)
+function ffi_util.checkfail(t, f)
   f = f or ffi.typeof
   for i=1,1e9 do
     local tp = t[i]
@@ -13,7 +14,7 @@ function checkfail(t, f)
   end
 end
 
-function checktypes(t)
+function ffi_util.checktypes(t)
   for i=1,1e9,3 do
     local tp = t[i+2]
     if not tp then break end
@@ -23,14 +24,14 @@ function checktypes(t)
   end
 end
 
-function fails(f, ...)
+function ffi_util.fails(f, ...)
   if pcall(f, ...) ~= false then error("failure expected", 2) end
 end
 
 local incroot = os.getenv("INCROOT") or "/usr/include"
 local cdefs = os.getenv("CDEFS") or ""
 
-function include(name)
+function ffi_util.include(name)
   local flags = ffi.abi("32bit") and "-m32" or "-m64"
   if string.sub(name, 1, 1) ~= "/" then name = incroot.."/"..name end
   local fp = assert(io.popen("cc -E -P "..flags.." "..cdefs.." "..name))
@@ -39,3 +40,4 @@ function include(name)
   ffi.cdef(s)
 end
 
+return ffi_util

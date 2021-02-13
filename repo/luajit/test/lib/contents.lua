@@ -18,8 +18,17 @@ local function check(m, expected, exclude)
   end
 end
 
-do --- base
-  check(_G, "_G:_VERSION:arg:assert:collectgarbage:coroutine:debug:dofile:error:exdata:getmetatable:io:ipairs:load:loadfile:math:next:os:package:pairs:pcall:print:rawequal:rawget:rawset:require:select:setmetatable:string:table:tonumber:tostring:type:xpcall", "rawlen:bit:bit32:jit:gcinfo:setfenv:getfenv:loadstring:unpack:module:newproxy")
+do --- base +ffi
+  if jit.os == "Linux" then
+    check(_G, "_G:_VERSION:arg:assert:collectgarbage:coroutine:ctest:debug:dofile:error:exdata:getmetatable:io:ipairs:load:loadfile:math:next:os:package:pairs:pcall:print:rawequal:rawget:rawset:require:select:setmetatable:string:table:tonumber:tostring:type:utf8:xpcall", "rawlen:bit:bit32:jit:gcinfo:setfenv:getfenv:loadstring:unpack:module:newproxy")
+  else
+    check(_G, "_G:_VERSION:arg:assert:collectgarbage:coroutine:debug:dofile:error:exdata:getmetatable:io:ipairs:load:loadfile:math:next:os:package:pairs:pcall:print:rawequal:rawget:rawset:require:select:setmetatable:string:table:tonumber:tostring:type:utf8:xpcall", "rawlen:bit:bit32:jit:gcinfo:setfenv:getfenv:loadstring:unpack:module:newproxy")
+  end
+
+end
+
+do --- base -ffi
+  check(_G, "_G:_VERSION:arg:assert:collectgarbage:coroutine:debug:dofile:error:getmetatable:io:ipairs:load:loadfile:math:next:os:package:pairs:pcall:print:rawequal:rawget:rawset:require:select:setmetatable:string:table:tonumber:tostring:type:utf8:xpcall", "rawlen:bit:bit32:jit:gcinfo:setfenv:getfenv:loadstring:unpack:module:newproxy")
 end
 
 do --- pre-5.2 base +lua<5.2
@@ -51,7 +60,7 @@ do --- 5.2 base rawlen +compat5.2
 end
 
 do --- math
-  check(math, "abs:acos:asin:atan:atan2:ceil:cos:cosh:deg:exp:floor:fmod:frexp:huge:ldexp:log:max:min:modf:pi:pow:rad:random:randomseed:sin:sinh:sqrt:tan:tanh", "log10:mod")
+  check(math, "abs:acos:asin:atan:atan2:ceil:cos:cosh:deg:exp:floor:fmod:frexp:huge:ldexp:log:max:maxinteger:min:mininteger:modf:pi:pow:rad:random:randomseed:sin:sinh:sqrt:tan:tanh:tointeger:type:ult", "log10:mod")
 end
 
 do --- pre-5.1 math +lua<5.1 -compat5.1
@@ -68,7 +77,7 @@ do --- 5.2 math +lua>=5.2
 end
 
 do --- string
-  check(string, "byte:char:dump:find:format:gmatch:gsub:len:lower:match:rep:reverse:sub:upper", "gfind")
+  check(string, "byte:char:dump:find:format:gmatch:gsub:len:lower:match:pack:packsize:rep:reverse:sub:unpack:upper", "gfind")
 end
 
 do --- pre-5.1 string +lua<5.1 -compat5.1
@@ -138,14 +147,32 @@ do --- package.loaders
   check(package.loaders or package.searchers, "1:2:3:4")
 end
 
-do --- package.loaded
+do --- package.loaded +ffi
   local loaded = {}
   for k, v in pairs(package.loaded) do
     if type(k) ~= "string" or (k:sub(1, 7) ~= "common." and k:sub(1, 4) ~= "jit.") then
       loaded[k] = v
     end
   end
-  check(loaded, "_G:coroutine:debug:io:math:os:package:string:table:thread.exdata", "bit:bit32:common:ffi:jit:table.new")
+  if jit.os == "Linux" then
+    check(loaded, "_G:coroutine:ctest:debug:io:math:os:package:string:table:thread.exdata", "bit:bit32:common:ffi:jit:table.new")
+  else
+    check(loaded, "_G:coroutine:debug:io:math:os:package:string:table:thread.exdata", "bit:bit32:common:ffi:jit:table.new")
+  end
+end
+
+do --- package.loaded -ffi
+  local loaded = {}
+  for k, v in pairs(package.loaded) do
+    if type(k) ~= "string" or (k:sub(1, 7) ~= "common." and k:sub(1, 4) ~= "jit.") then
+      loaded[k] = v
+    end
+  end
+  check(loaded, "_G:coroutine:debug:io:math:os:package:string:table", "bit:bit32:common:ffi:jit:table.new")
+end
+
+do --- utf8
+  check(utf8, "char:charpattern:codepoint:codes:len:offset")
 end
 
 do --- bit +bit

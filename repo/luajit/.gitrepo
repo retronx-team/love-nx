@@ -6,7 +6,7 @@
 [subrepo]
 	remote = https://github.com/siddhesh/LuaJIT
 	branch = master
-	commit = d8a7769ef37435f3c81c19779395eb6adb95037a
-	parent = 94249d79f9cf846b4f83ea0854a75d74e33d2983
+	commit = a2a39ea7184f3c8cab9474c6e41f6541265fb362
+	parent = a212464cfd5a5d71a58c47963d6c0e8844d59ffb
 	method = merge
-	cmdver = 0.4.0
+	cmdver = 0.4.3
