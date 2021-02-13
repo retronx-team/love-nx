@@ -42,5 +42,4 @@ NRO and ELF files will be located in the `dist` folder.
 
 ## Known limitations
 
-* VI Layer creation error when changing video modes, use conf.lua to set a resolution 
 * Message boxes do nothing more than being logged to stdout
