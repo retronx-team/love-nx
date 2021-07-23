@@ -20,12 +20,11 @@ CFLAGS="$CFLAGS -g -I$PORTLIBS_PREFIX/include  -I$PORTLIBS_PREFIX/include/SDL2 -
 export SDL2DIR="$PORTLIBS_PREFIX"
 
 function switch_cmake() {
-	cmake -G"Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/switch.cmake" \
-		-DNX=1 \
+	cmake -G"Unix Makefiles" \
+		-DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/cmake/Switch.cmake" \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_C_FLAGS="$CFLAGS $CPPFLAGS" \
 		-DCMAKE_CXX_FLAGS="$CFLAGS" \
-		-DCMAKE_AR="$DEVKITPRO/devkitA64/bin/aarch64-none-elf-gcc-ar" \
 		"$@"
 }
 
