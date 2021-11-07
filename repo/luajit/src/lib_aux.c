@@ -1,6 +1,6 @@
 /*
 ** Auxiliary library for the Lua/C API.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 **
 ** Major parts taken verbatim or adapted from the Lua interpreter.
 ** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
@@ -158,20 +158,6 @@ LUALIB_API void luaL_setfuncs(lua_State *L, const luaL_Reg *l, int nup)
   lua_pop(L, nup);  /* Remove upvalues. */
 }
 
-LUALIB_API int luaL_getsubtable(lua_State *L, int idx, const char *fname)
-{
-  lua_getfield(L, idx, fname);
-  if (lua_istable(L, -1)) return 1;  /* table already there */
-  else {
-    lua_pop(L, 1);  /* remove previous result */
-    idx = lua_absindex(L, idx);
-    lua_newtable(L);
-    lua_pushvalue(L, -1);  /* copy to be left at top */
-    lua_setfield(L, idx, fname);  /* assign new table to field */
-    return 0;  /* false, because did not find table there */
-  }
-}
-
 LUALIB_API const char *luaL_gsub(lua_State *L, const char *s,
 				 const char *p, const char *r)
 {
@@ -253,12 +239,6 @@ LUALIB_API void luaL_pushresult(luaL_Buffer *B)
   emptybuffer(B);
   lua_concat(B->L, B->lvl);
   B->lvl = 1;
-}
-
-LUALIB_API void luaL_pushresultsize(luaL_Buffer *B, size_t sz)
-{
-  luaL_addsize(B, sz);
-  luaL_pushresult(B);
 }
 
 LUALIB_API void luaL_addvalue(luaL_Buffer *B)
@@ -365,17 +345,13 @@ LUALIB_API lua_State *luaL_newstate(void)
 
 #else
 
-#include "lj_alloc.h"
-
 LUALIB_API lua_State *luaL_newstate(void)
 {
   lua_State *L;
-  void *ud = lj_alloc_create();
-  if (ud == NULL) return NULL;
 #if LJ_64 && !LJ_GC64
-  L = lj_state_newstate(lj_alloc_f, ud);
+  L = lj_state_newstate(LJ_ALLOCF_INTERNAL, NULL);
 #else
-  L = lua_newstate(lj_alloc_f, ud);
+  L = lua_newstate(LJ_ALLOCF_INTERNAL, NULL);
 #endif
   if (L) G(L)->panic = panic;
   return L;

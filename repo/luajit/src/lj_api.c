@@ -1,6 +1,6 @@
 /*
 ** Public Lua/C API.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 **
 ** Major portions taken verbatim or adapted from the Lua interpreter.
 ** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
@@ -8,8 +8,6 @@
 
 #define lj_api_c
 #define LUA_CORE
-
-#include "lauxlib.h"
 
 #include "lj_obj.h"
 #include "lj_gc.h"
@@ -27,8 +25,6 @@
 #include "lj_vm.h"
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
-
-int luaJIT_compat52 = LJ_52;
 
 /* -- Common helper functions --------------------------------------------- */
 
@@ -140,13 +136,6 @@ LUA_API const lua_Number *lua_version(lua_State *L)
 }
 
 /* -- Stack manipulation -------------------------------------------------- */
-
-LUA_API int lua_absindex (lua_State *L, int idx)
-{
-  return (idx > 0 || idx <= LUA_REGISTRYINDEX)
-         ? idx
-         : (int)(L->top - L->base) + idx + 1;
-}
 
 LUA_API int lua_gettop(lua_State *L)
 {
@@ -531,29 +520,6 @@ LUA_API const char *lua_tolstring(lua_State *L, int idx, size_t *len)
   return strdata(s);
 }
 
-LUALIB_API const char *luaL_tolstring(lua_State *L, int idx, size_t *len)
-{
-  if (!luaL_callmeta(L, idx, "__tostring")) {  /* no metafield? */
-    switch (lua_type(L, idx)) {
-      case LUA_TNUMBER:
-      case LUA_TSTRING:
-        lua_pushvalue(L, idx);
-        break;
-      case LUA_TBOOLEAN:
-        lua_pushstring(L, (lua_toboolean(L, idx) ? "true" : "false"));
-        break;
-      case LUA_TNIL:
-        lua_pushliteral(L, "nil");
-        break;
-      default:
-        lua_pushfstring(L, "%s: %p", lua_typename(L, lua_type(L, idx)),
-                                            lua_topointer(L, idx));
-        break;
-    }
-  }
-  return lua_tolstring(L, -1, len);
-}
-
 LUALIB_API const char *luaL_checklstring(lua_State *L, int idx, size_t *len)
 {
   TValue *o = index2adr(L, idx);
@@ -625,20 +591,6 @@ LUA_API size_t lua_objlen(lua_State *L, int idx)
   }
 }
 
-LUA_API size_t lua_rawlen(lua_State *L, int idx)
-{
-  TValue *o = index2adr(L, idx);
-  if (tvisstr(o)) {
-    return strV(o)->len;
-  } else if (tvistab(o)) {
-    return (size_t)lj_tab_len(tabV(o));
-  } else if (tvisudata(o)) {
-    return udataV(o)->len;
-  } else {
-    return 0;
-  }
-}
-
 LUA_API lua_CFunction lua_tocfunction(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);
@@ -656,7 +608,7 @@ LUA_API void *lua_touserdata(lua_State *L, int idx)
   if (tvisudata(o))
     return uddata(udataV(o));
   else if (tvislightud(o))
-    return lightudV(o);
+    return lightudV(G(L), o);
   else
     return NULL;
 }
@@ -669,7 +621,7 @@ LUA_API lua_State *lua_tothread(lua_State *L, int idx)
 
 LUA_API const void *lua_topointer(lua_State *L, int idx)
 {
-  return lj_obj_ptr(index2adr(L, idx));
+  return lj_obj_ptr(G(L), index2adr(L, idx));
 }
 
 /* -- Stack setters (object creation) ------------------------------------- */
@@ -757,7 +709,10 @@ LUA_API void lua_pushboolean(lua_State *L, int b)
 
 LUA_API void lua_pushlightuserdata(lua_State *L, void *p)
 {
-  setlightudV(L->top, checklightudptr(L, p));
+#if LJ_64
+  p = lj_lightud_intern(L, p);
+#endif
+  setrawlightudV(L->top, p);
   incr_top(L);
 }
 
@@ -835,25 +790,6 @@ LUA_API void lua_concat(lua_State *L, int n)
     incr_top(L);
   }
   /* else n == 1: nothing to do. */
-}
-
-LUA_API void lua_len (lua_State *L, int idx)
-{
-  TValue *o = index2adr_check(L, idx);
-  if (tvisstr(o)) {
-    setnumV(L->top, strV(o)->len);
-  } else if (tvistab(o) && (!LJ_52 || tvisnil(lj_meta_lookup(L, o, MM_len)))) {
-    setnumV(L->top, lj_tab_len(tabV(o)));
-  } else {
-    TValue *v;
-    L->top = lj_meta_len(L, o);
-    L->top += 2;
-    lj_vm_call(L, L->top-2, 1+1);
-    L->top -= 2+LJ_FR2;
-    v = L->top+1+LJ_FR2;
-    copyTV(L, L->top, v);
-  }
-  incr_top(L);
 }
 
 /* -- Object getters ------------------------------------------------------ */
@@ -957,11 +893,13 @@ LUA_API int lua_next(lua_State *L, int idx)
   cTValue *t = index2adr(L, idx);
   int more;
   lj_checkapi(tvistab(t), "stack slot %d is not a table", idx);
-  more = lj_tab_next(L, tabV(t), L->top-1);
-  if (more) {
+  more = lj_tab_next(tabV(t), L->top-1, L->top-1);
+  if (more > 0) {
     incr_top(L);  /* Return new key and value slot. */
-  } else {  /* End of traversal. */
+  } else if (!more) {  /* End of traversal. */
     L->top--;  /* Remove key slot. */
+  } else {
+    lj_err_msg(L, LJ_ERR_NEXTIDX);
   }
   return more;
 }
@@ -1166,28 +1104,6 @@ LUA_API const char *lua_setupvalue(lua_State *L, int idx, int n)
   return name;
 }
 
-LUALIB_API void luaL_requiref(lua_State *L, char const* modname,
-                    lua_CFunction openf, int glb) {
-  luaL_checkstack(L, 3, "not enough stack slots");
-  lua_getglobal(L, "package");
-  lua_getfield(L, -1, "loaded");
-  lua_pop(L, 1);
-  lua_getfield(L, -1, modname);
-  if (lua_isnil(L, -1) == 1) {
-    lua_pop(L, 1);
-    lua_pushcfunction(L, openf);
-    lua_pushstring(L, modname);
-    lua_call(L, 1, 1);
-    lua_pushvalue(L, -1);
-    lua_setfield(L, -3, modname);
-  }
-  lua_remove(L, -2);
-  if (glb) {
-    lua_pushvalue(L, -1);
-    lua_setglobal(L, modname);
-  }
-}
-
 /* -- Calls --------------------------------------------------------------- */
 
 #if LJ_FR2
@@ -1238,7 +1154,10 @@ static TValue *cpcall(lua_State *L, lua_CFunction func, void *ud)
   fn->c.f = func;
   setfuncV(L, top++, fn);
   if (LJ_FR2) setnilV(top++);
-  setlightudV(top++, checklightudptr(L, ud));
+#if LJ_64
+  ud = lj_lightud_intern(L, ud);
+#endif
+  setrawlightudV(top++, ud);
   cframe_nres(L->cframe) = 1+0;  /* Zero results. */
   L->top = top;
   return top-1;  /* Now call the newly allocated C function. */
@@ -1267,18 +1186,6 @@ LUALIB_API int luaL_callmeta(lua_State *L, int idx, const char *field)
     return 1;
   }
   return 0;
-}
-
-LUALIB_API lua_Integer luaL_len(lua_State *L, int idx)
-{
-  lua_Integer l;
-  int isnum;
-  lua_len(L, idx);
-  l = lua_tointegerx(L, -1, &isnum);
-  if (!isnum)
-    luaL_error(L, "object length is not a number");
-  lua_pop(L, 1);  /* remove object */
-  return l;
 }
 
 /* -- Coroutine yield and resume ------------------------------------------ */
@@ -1311,11 +1218,12 @@ LUA_API int lua_yield(lua_State *L, int nresults)
       setcont(top, lj_cont_hook);
       if (LJ_FR2) top++;
       setframe_pc(top, cframe_pc(cf)-1);
-      if (LJ_FR2) top++;
+      top++;
       setframe_gc(top, obj2gco(L), LJ_TTHREAD);
+      if (LJ_FR2) top++;
       setframe_ftsz(top, ((char *)(top+1)-(char *)L->base)+FRAME_CONT);
       L->top = L->base = top+1;
-#if LJ_TARGET_X64
+#if ((defined(__GNUC__) || defined(__clang__)) && (LJ_TARGET_X64 || defined(LUAJIT_UNWIND_EXTERNAL)) && !LJ_NO_UNWIND) || LJ_TARGET_WINDOWS
       lj_err_throw(L, LUA_YIELD);
 #else
       L->cframe = NULL;
@@ -1403,12 +1311,3 @@ LUA_API void lua_setallocf(lua_State *L, lua_Alloc f, void *ud)
   g->allocf = f;
 }
 
-LUA_API void lua_setexdata(lua_State *L, void *exdata)
-{
-  L->exdata = exdata;
-}
-
-LUA_API void *lua_getexdata(lua_State *L)
-{
-  return L->exdata;
-}

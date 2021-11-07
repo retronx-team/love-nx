@@ -1,6 +1,6 @@
 /*
 ** Debugging and introspection.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_DEBUG_H
@@ -62,16 +62,5 @@ enum {
 #undef VARNAMEENUM
   VARNAME__MAX
 };
-
-#ifdef LUA_USE_TRACE_LOGS
-LJ_FUNC void LJ_FASTCALL lj_log_trace_direct_exit(lua_State *L,
-  int vmstate, const BCIns *pc);
-LJ_FUNC void LJ_FASTCALL lj_log_trace_normal_exit(lua_State *L,
-  int vmstate, const BCIns *pc);
-LJ_FUNC void LJ_FASTCALL lj_log_trace_entry(lua_State *L,
-  unsigned traceno, const BCIns *pc);
-LJ_FUNC void LJ_FASTCALL lj_log_trace_start_record(lua_State *L, unsigned traceno,
-  const BCIns *pc, GCfunc *fn);
-#endif
 
 #endif

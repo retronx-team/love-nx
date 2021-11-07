@@ -1,6 +1,6 @@
 /*
 ** Library initialization.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 **
 ** Major parts taken verbatim from the Lua interpreter.
 ** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
@@ -26,7 +26,6 @@ static const luaL_Reg lj_lib_load[] = {
   { LUA_DBLIBNAME,	luaopen_debug },
   { LUA_BITLIBNAME,	luaopen_bit },
   { LUA_JITLIBNAME,	luaopen_jit },
-  { LUA_UTF8LIBNAME,	luaopen_utf8 }, /* require base, string, debug, bit */
   { NULL,		NULL }
 };
 

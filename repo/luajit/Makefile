@@ -10,13 +10,13 @@
 # For MSVC, please follow the instructions given in src/msvcbuild.bat.
 # For MinGW and Cygwin, cd to src and run make with the Makefile there.
 #
-# Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+# Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 ##############################################################################
 
 MAJVER=  2
-MINVER=  3
+MINVER=  1
 RELVER=  0
-PREREL= -dev
+PREREL=  -beta3
 VERSION= $(MAJVER).$(MINVER).$(RELVER)$(PREREL)
 ABIVER=  5.1
 
@@ -33,9 +33,9 @@ DPREFIX= $(DESTDIR)$(PREFIX)
 INSTALL_BIN=   $(DPREFIX)/bin
 INSTALL_LIB=   $(DPREFIX)/$(MULTILIB)
 INSTALL_SHARE= $(DPREFIX)/share
-INSTALL_INC=   $(DPREFIX)/include/moonjit-$(MAJVER).$(MINVER)
+INSTALL_INC=   $(DPREFIX)/include/luajit-$(MAJVER).$(MINVER)
 
-INSTALL_LJLIBD= $(INSTALL_SHARE)/moonjit-$(VERSION)
+INSTALL_LJLIBD= $(INSTALL_SHARE)/luajit-$(VERSION)
 INSTALL_JITLIB= $(INSTALL_LJLIBD)/jit
 INSTALL_LMODD= $(INSTALL_SHARE)/lua
 INSTALL_LMOD= $(INSTALL_LMODD)/$(ABIVER)
@@ -44,7 +44,7 @@ INSTALL_CMOD= $(INSTALL_CMODD)/$(ABIVER)
 INSTALL_MAN= $(INSTALL_SHARE)/man/man1
 INSTALL_PKGCONFIG= $(INSTALL_LIB)/pkgconfig
 
-INSTALL_TNAME= moonjit-$(VERSION)
+INSTALL_TNAME= luajit-$(VERSION)
 INSTALL_TSYMNAME= luajit
 INSTALL_ANAME= libluajit-$(ABIVER).a
 INSTALL_SOSHORT1= libluajit-$(ABIVER).so
@@ -75,12 +75,9 @@ SYMLINK= ln -sf
 INSTALL_X= install -m 0755
 INSTALL_F= install -m 0644
 UNINSTALL= $(RM)
-LDCONFIG= ldconfig -n 2> /dev/null
+LDCONFIG= ldconfig -n 2>/dev/null
 SED_PC= sed -e "s|^prefix=.*|prefix=$(PREFIX)|" \
-            -e "s|^multilib=.*|multilib=$(MULTILIB)|" \
-            -e "s|^majver=.*|majver=$(MAJVER)|" \
-            -e "s|^minver=.*|minver=$(MINVER)|" \
-            -e "s|^relver=.*|relver=$(RELVER)|"
+            -e "s|^multilib=.*|multilib=$(MULTILIB)|"
 
 FILE_T= luajit
 FILE_A= libluajit.a
@@ -109,15 +106,15 @@ endif
 
 ##############################################################################
 
-LUAJIT_BIN= src/luajit
+INSTALL_DEP= src/luajit
 
-default all $(LUAJIT_BIN):
-	@echo "==== Building moonjit $(VERSION) ===="
+default all $(INSTALL_DEP):
+	@echo "==== Building LuaJIT $(VERSION) ===="
 	$(MAKE) -C src
-	@echo "==== Successfully built moonjit $(VERSION) ===="
+	@echo "==== Successfully built LuaJIT $(VERSION) ===="
 
-install: $(LUAJIT_BIN)
-	@echo "==== Installing moonjit $(VERSION) to $(PREFIX) ===="
+install: $(INSTALL_DEP)
+	@echo "==== Installing LuaJIT $(VERSION) to $(PREFIX) ===="
 	$(MKDIR) $(INSTALL_DIRS)
 	cd src && $(INSTALL_X) $(FILE_T) $(INSTALL_T)
 	cd src && test -f $(FILE_A) && $(INSTALL_F) $(FILE_A) $(INSTALL_STATIC) || :
@@ -133,12 +130,17 @@ install: $(LUAJIT_BIN)
 	  $(RM) $(FILE_PC).tmp
 	cd src && $(INSTALL_F) $(FILES_INC) $(INSTALL_INC)
 	cd src/jit && $(INSTALL_F) $(FILES_JITLIB) $(INSTALL_JITLIB)
-	$(SYMLINK) $(INSTALL_TNAME) $(INSTALL_TSYM)
-	@echo "==== Successfully installed moonjit $(VERSION) to $(PREFIX) ===="
+	@echo "==== Successfully installed LuaJIT $(VERSION) to $(PREFIX) ===="
+	@echo ""
+	@echo "Note: the development releases deliberately do NOT install a symlink for luajit"
+	@echo "You can do this now by running this command (with sudo):"
+	@echo ""
+	@echo "  $(SYMLINK) $(INSTALL_TNAME) $(INSTALL_TSYM)"
+	@echo ""
 
 
 uninstall:
-	@echo "==== Uninstalling moonjit $(VERSION) from $(PREFIX) ===="
+	@echo "==== Uninstalling LuaJIT $(VERSION) from $(PREFIX) ===="
 	$(UNINSTALL) $(INSTALL_T) $(INSTALL_STATIC) $(INSTALL_DYN) $(INSTALL_SHORT1) $(INSTALL_SHORT2) $(INSTALL_MAN)/$(FILE_MAN) $(INSTALL_PC)
 	for file in $(FILES_JITLIB); do \
 	  $(UNINSTALL) $(INSTALL_JITLIB)/$$file; \
@@ -148,33 +150,17 @@ uninstall:
 	  done
 	$(LDCONFIG) $(INSTALL_LIB)
 	$(RMDIR) $(UNINSTALL_DIRS) || :
-	@echo "==== Successfully uninstalled moonjit $(VERSION) from $(PREFIX) ===="
-
-check: $(LUAJIT_BIN)
-	@echo "==== Running tests for moonjit $(VERSION) ===="
-	@echo "Creating ctest and cpptest"
-	$(MAKE) -C test
-	@echo "performing checks"
-	cd test && ../$^ test.lua
-	@echo "==== All tests for moonjit $(VERSION) succeeded ===="
-
-# It is assumed that libluajit.a is built in the process of building LUAJIT_BIN.
-bench: $(LUAJIT_BIN)
-	@echo "==== Running benchmark for moonjit $(VERSION) ===="
-	make -C bench FILE_A=$(FILE_A)
-	@echo "==== Successfully finished running benchmark for moonjit $(VERSION) ===="
+	@echo "==== Successfully uninstalled LuaJIT $(VERSION) from $(PREFIX) ===="
 
 ##############################################################################
 
 amalg:
-	@echo "Building moonjit $(VERSION)"
+	@echo "Building LuaJIT $(VERSION)"
 	$(MAKE) -C src amalg
 
 clean:
 	$(MAKE) -C src clean
-	$(MAKE) -C test clean
-	$(MAKE) -C bench clean
 
-.PHONY: all install amalg clean bench check
+.PHONY: all install amalg clean
 
 ##############################################################################

@@ -1,6 +1,6 @@
 /*
 ** Definitions for target CPU.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_TARGET_H
@@ -144,8 +144,6 @@ typedef uint32_t RegCost;
 #include "lj_target_ppc.h"
 #elif LJ_TARGET_MIPS
 #include "lj_target_mips.h"
-#elif LJ_TARGET_S390X
-#include "lj_target_s390x.h"
 #else
 #error "Missing include for target CPU"
 #endif
