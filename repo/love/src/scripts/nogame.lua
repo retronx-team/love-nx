@@ -3263,10 +3263,8 @@ function love.nogame()
 		end
 	end
 
-	function love.gamepadpressed(joystick, button)
-		if button == "start" or button == "b" or button == "a" then
-			love.event.quit()
-		end
+	function love.gamepadpressed()
+		love.event.quit()
 	end
 
 	function love.resize()

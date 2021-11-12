@@ -501,6 +501,14 @@ function love.init()
 	end
 
 	if love.event then
+		-- SDL2 on NX doesn't consider its joysticks "added" at startup, which means that love.joystickadded will never be called!
+		-- So we have to call it ourselves by adding joystickadded events for each joystick.
+		if love._os == "NX" and love.joystick then
+			for i,v in ipairs(love.joystick.getJoysticks()) do
+				love.event.push("joystickadded", v)
+			end
+		end
+
 		love.createhandlers()
 	end
 
@@ -718,27 +726,25 @@ function love.errhand(msg)
 	end
 
 	if love._os == "NX" then
-		p = p .. "\n\nPress B/A/Start or tap to exit"
+		p = p .. "\n\nPress any button or tap to exit"
 	elseif love.system then
 		p = p .. "\n\nPress Ctrl+C or tap to copy this error"
 	end
 
+	local nxQuitEvent = {["gamepadpressed"] = true, ["touchpressed"] = true}
 	return function()
 		love.event.pump()
 
 		for e, a, b, c in love.event.poll() do
 			if e == "quit" then
 				return 1
+			elseif love._os == "NX" and nxQuitEvent[e] then
+				return 1
 			elseif e == "keypressed" and a == "escape" then
 				return 1
 			elseif e == "keypressed" and a == "c" and love.keyboard.isDown("lctrl", "rctrl") then
 				copyToClipboard()
-			elseif e == "gamepadpressed" and love._os == "NX" and (b == "b" or b == "a" or "start") then
-				return 1
 			elseif e == "touchpressed" then
-				if love._os == "NX" then
-					return 1
-				end
 				local name = love.window.getTitle()
 				if #name == 0 or name == "Untitled" then name = "Game" end
 				local buttons = {"OK", "Cancel"}
