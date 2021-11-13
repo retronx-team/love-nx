@@ -102,6 +102,10 @@ typedef BOOLEAN (WINAPI *PRGR)(void *buf, ULONG len);
 static PRGR libfunc_rgr;
 #endif
 
+#elif defined(__SWITCH__)
+
+extern void randomGet(void* buf, size_t len);
+
 #elif LJ_TARGET_POSIX
 
 #if LJ_TARGET_LINUX
@@ -193,6 +197,11 @@ int LJ_FASTCALL lj_prng_seed_secure(PRNGState *rs)
   }
   if (libfunc_rgr(rs->u, (ULONG)sizeof(rs->u)))
     goto ok;
+
+#elif defined(__SWITCH__)
+
+  randomGet(rs->u, sizeof(rs->u));
+  goto ok;
 
 #elif LJ_TARGET_POSIX
 
