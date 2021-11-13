@@ -1,6 +1,6 @@
 /*
 ** LuaJIT common internal definitions.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_DEF_H
@@ -71,11 +71,7 @@ typedef unsigned int uintptr_t;
 #define LJ_MAX_IDXCHAIN	100		/* __index/__newindex chain limit. */
 #define LJ_STACK_EXTRA	(5+2*LJ_FR2)	/* Extra stack space (metamethods). */
 
-#if defined(__powerpc64__) && _CALL_ELF != 2
-#define LJ_NUM_CBPAGE	4		/* Number of FFI callback pages. */
-#else
 #define LJ_NUM_CBPAGE	1		/* Number of FFI callback pages. */
-#endif
 
 /* Minimum table/buffer sizes. */
 #define LJ_MIN_GLOBAL	6		/* Min. global table size (hbits). */
@@ -376,5 +372,10 @@ static LJ_AINLINE uint32_t lj_getu32(const void *v)
 #define LJ_STATIC_ASSERT(cond) \
   extern void LJ_ASSERT_NAME(__LINE__)(int STATIC_ASSERTION_FAILED[(cond)?1:-1])
 #endif
+
+/* PRNG state. Need this here, details in lj_prng.h. */
+typedef struct PRNGState {
+  uint64_t u[4];
+} PRNGState;
 
 #endif

@@ -3,7 +3,7 @@
 ** AA: Alias Analysis using high-level semantic disambiguation.
 ** FWD: Load Forwarding (L2L) + Store Forwarding (S2L).
 ** DSE: Dead-Store Elimination.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #define lj_opt_mem_c
@@ -364,16 +364,16 @@ TRef LJ_FASTCALL lj_opt_dse_ahstore(jit_State *J)
       /* Different value: try to eliminate the redundant store. */
       if (ref > J->chain[IR_LOOP]) {  /* Quick check to avoid crossing LOOP. */
 	IRIns *ir;
-	/* Check for any intervening guards (includes conflicting loads). */
+	/* Check for any intervening guards (includes conflicting loads).
+	** Note that lj_tab_keyindex and lj_vm_next don't need guards,
+	** since they are followed by at least one guarded VLOAD.
+	*/
 	for (ir = IR(J->cur.nins-1); ir > store; ir--)
 	  if (irt_isguard(ir->t) || ir->o == IR_ALEN)
 	    goto doemit;  /* No elimination possible. */
 	/* Remove redundant store from chain and replace with NOP. */
 	*refp = store->prev;
-	store->o = IR_NOP;
-	store->t.irt = IRT_NIL;
-	store->op1 = store->op2 = 0;
-	store->prev = 0;
+	lj_ir_nop(store);
 	/* Now emit the new store instead. */
       }
       goto doemit;
@@ -534,10 +534,7 @@ TRef LJ_FASTCALL lj_opt_dse_ustore(jit_State *J)
 	    goto doemit;  /* No elimination possible. */
 	/* Remove redundant store from chain and replace with NOP. */
 	*refp = store->prev;
-	store->o = IR_NOP;
-	store->t.irt = IRT_NIL;
-	store->op1 = store->op2 = 0;
-	store->prev = 0;
+	lj_ir_nop(store);
 	if (ref+1 < J->cur.nins &&
 	    store[1].o == IR_OBAR && store[1].op1 == xref) {
 	  IRRef1 *bp = &J->chain[IR_OBAR];
@@ -546,10 +543,7 @@ TRef LJ_FASTCALL lj_opt_dse_ustore(jit_State *J)
 	    bp = &obar->prev;
 	  /* Remove OBAR, too. */
 	  *bp = obar->prev;
-	  obar->o = IR_NOP;
-	  obar->t.irt = IRT_NIL;
-	  obar->op1 = obar->op2 = 0;
-	  obar->prev = 0;
+	  lj_ir_nop(obar);
 	}
 	/* Now emit the new store instead. */
       }
@@ -629,8 +623,9 @@ TRef LJ_FASTCALL lj_opt_dse_fstore(jit_State *J)
 	goto doemit;
       break;  /* Otherwise continue searching. */
     case ALIAS_MUST:
-      if (store->op2 == val)  /* Same value: drop the new store. */
-	return DROPFOLD;
+      if (store->op2 == val &&
+	  !(xr->op2 >= IRFL_SBUF_W && xr->op2 <= IRFL_SBUF_R))
+	return DROPFOLD;  /* Same value: drop the new store. */
       /* Different value: try to eliminate the redundant store. */
       if (ref > J->chain[IR_LOOP]) {  /* Quick check to avoid crossing LOOP. */
 	IRIns *ir;
@@ -640,10 +635,7 @@ TRef LJ_FASTCALL lj_opt_dse_fstore(jit_State *J)
 	    goto doemit;  /* No elimination possible. */
 	/* Remove redundant store from chain and replace with NOP. */
 	*refp = store->prev;
-	store->o = IR_NOP;
-	store->t.irt = IRT_NIL;
-	store->op1 = store->op2 = 0;
-	store->prev = 0;
+	lj_ir_nop(store);
 	/* Now emit the new store instead. */
       }
       goto doemit;
@@ -652,6 +644,29 @@ TRef LJ_FASTCALL lj_opt_dse_fstore(jit_State *J)
   }
 doemit:
   return EMITFOLD;  /* Otherwise we have a conflict or simply no match. */
+}
+
+/* Check whether there's no aliasing buffer op between IRFL_SBUF_*. */
+int LJ_FASTCALL lj_opt_fwd_sbuf(jit_State *J, IRRef lim)
+{
+  IRRef ref;
+  if (J->chain[IR_BUFPUT] > lim)
+    return 0;  /* Conflict. */
+  ref = J->chain[IR_CALLS];
+  while (ref > lim) {
+    IRIns *ir = IR(ref);
+    if (ir->op2 >= IRCALL_lj_strfmt_putint && ir->op2 < IRCALL_lj_buf_tostr)
+      return 0;  /* Conflict. */
+    ref = ir->prev;
+  }
+  ref = J->chain[IR_CALLL];
+  while (ref > lim) {
+    IRIns *ir = IR(ref);
+    if (ir->op2 >= IRCALL_lj_strfmt_putint && ir->op2 < IRCALL_lj_buf_tostr)
+      return 0;  /* Conflict. */
+    ref = ir->prev;
+  }
+  return 1;  /* No conflict. Can safely FOLD/CSE. */
 }
 
 /* -- XLOAD forwarding and XSTORE elimination ----------------------------- */
@@ -894,10 +909,7 @@ TRef LJ_FASTCALL lj_opt_dse_xstore(jit_State *J)
 	    goto doemit;  /* No elimination possible. */
 	/* Remove redundant store from chain and replace with NOP. */
 	*refp = store->prev;
-	store->o = IR_NOP;
-	store->t.irt = IRT_NIL;
-	store->op1 = store->op2 = 0;
-	store->prev = 0;
+	lj_ir_nop(store);
 	/* Now emit the new store instead. */
       }
       goto doemit;

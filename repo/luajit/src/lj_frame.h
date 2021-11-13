@@ -1,6 +1,6 @@
 /*
 ** Stack frames.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_FRAME_H
@@ -46,7 +46,7 @@ enum {
 #define frame_gc(f)		(gcval((f)-1))
 #define frame_ftsz(f)		((ptrdiff_t)(f)->ftsz)
 #define frame_pc(f)		((const BCIns *)frame_ftsz(f))
-#define setframe_gc(f, p, tp)	(setgcVraw((f)-1, (p), (tp)))
+#define setframe_gc(f, p, tp)	(setgcVraw((f), (p), (tp)))
 #define setframe_ftsz(f, sz)	((f)->ftsz = (sz))
 #define setframe_pc(f, pc)	((f)->ftsz = (int64_t)(intptr_t)(pc))
 #else
@@ -192,12 +192,12 @@ enum { LJ_CONT_TAILCALL, LJ_CONT_FFI_CALLBACK };  /* Special continuations. */
 #endif
 #define CFRAME_SHIFT_MULTRES	3
 #elif LJ_TARGET_ARM64
-#define CFRAME_OFS_ERRF		196
-#define CFRAME_OFS_NRES		200
-#define CFRAME_OFS_PREV		160
-#define CFRAME_OFS_L		176
-#define CFRAME_OFS_PC		168
-#define CFRAME_OFS_MULTRES	192
+#define CFRAME_OFS_ERRF		36
+#define CFRAME_OFS_NRES		40
+#define CFRAME_OFS_PREV		0
+#define CFRAME_OFS_L		16
+#define CFRAME_OFS_PC		8
+#define CFRAME_OFS_MULTRES	32
 #define CFRAME_SIZE		208
 #define CFRAME_SHIFT_MULTRES	3
 #elif LJ_TARGET_PPC
@@ -209,15 +209,6 @@ enum { LJ_CONT_TAILCALL, LJ_CONT_FFI_CALLBACK };  /* Special continuations. */
 #define CFRAME_OFS_PC		412
 #define CFRAME_OFS_MULTRES	408
 #define CFRAME_SIZE		384
-#define CFRAME_SHIFT_MULTRES	3
-#elif LJ_ARCH_PPC_ELFV2
-#define CFRAME_OFS_ERRF		360
-#define CFRAME_OFS_NRES		356
-#define CFRAME_OFS_PREV		336
-#define CFRAME_OFS_L		352
-#define CFRAME_OFS_PC		348
-#define CFRAME_OFS_MULTRES	344
-#define CFRAME_SIZE		368
 #define CFRAME_SHIFT_MULTRES	3
 #elif LJ_ARCH_PPC32ON64
 #define CFRAME_OFS_ERRF		472
@@ -273,20 +264,6 @@ enum { LJ_CONT_TAILCALL, LJ_CONT_FFI_CALLBACK };  /* Special continuations. */
 #endif
 #define CFRAME_OFS_MULTRES	0
 #define CFRAME_SHIFT_MULTRES	3
-#elif LJ_TARGET_S390X
-#define CFRAME_OFS_ERRF		280
-#define CFRAME_OFS_NRES		272
-#define CFRAME_OFS_PREV		264
-#define CFRAME_OFS_L		256
-#define CFRAME_OFS_PC		168
-#define CFRAME_OFS_MULTRES	160
-#define CFRAME_SIZE		240
-/*
-** TODO: it would be good if we always decoded param*8 like
-** the RISC architectures do. If so then SHIFT_MULTRES will
-** need to change to 3.
-*/
-#define CFRAME_SHIFT_MULTRES	0
 #else
 #error "Missing CFRAME_* definitions for this architecture"
 #endif
