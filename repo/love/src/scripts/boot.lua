@@ -501,6 +501,14 @@ function love.init()
 	end
 
 	if love.event then
+		-- SDL2 on NX doesn't consider its joysticks "added" at startup, which means that love.joystickadded will never be called!
+		-- So we have to call it ourselves by adding joystickadded events for each joystick.
+		if love._os == "NX" and love.joystick then
+			for i,v in ipairs(love.joystick.getJoysticks()) do
+				love.event.push("joystickadded", v)
+			end
+		end
+
 		love.createhandlers()
 	end
 
