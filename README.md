@@ -30,6 +30,8 @@ cp game.love romfs/game.love # Your game here
 "$DEVKITPRO/tools/bin/elf2nro" love.elf "game.nro" --icon="$APP_ICON" --nacp="game.nacp" --romfsdir="romfs"
 ```
 
+**Note:** All the required tools to package a game can also be compiled [from this repo](https://github.com/switchbrew/switch-tools)
+
 ### Compiling from source
 
 Run one the following command from the project root to build:
@@ -40,6 +42,7 @@ Run one the following command from the project root to build:
 
 NRO and ELF files will be located in the `dist` folder.
 
-## Known limitations
+## Known differences with PC
 
-* Message boxes do nothing more than being logged to stdout
+* `love.window.showMessageBox()` logs arguments to stdout
+* Using LuaJIT v2.1 instead of v2.0
