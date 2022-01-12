@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -26,6 +26,7 @@
 #include "common/int.h"
 
 #include <cstring>
+#include <string>
 #include <vector>
 #include <set>
 
@@ -59,6 +60,7 @@ public:
 			: len(len)
 		{
 			str = new char[len+1];
+			str[len] = '\0';
 			memcpy(str, string, len);
 		}
 		virtual ~SharedString() { delete[] str; }
@@ -99,7 +101,8 @@ public:
 	Variant();
 	Variant(bool boolean);
 	Variant(double number);
-	Variant(const char *string, size_t len);
+	Variant(const char *str, size_t len);
+	Variant(const std::string &str);
 	Variant(void *lightuserdata);
 	Variant(love::Type *type, love::Object *object);
 	Variant(std::vector<std::pair<Variant, Variant>> *table);

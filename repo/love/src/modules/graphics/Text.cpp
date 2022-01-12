@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -111,20 +111,19 @@ void Text::addTextData(const TextData &t)
 	else
 		new_commands = font->generateVerticesFormatted(t.codepoints, constantcolor, t.wrap, t.align, vertices, &text_info);
 
-	if (vertices.empty())
-		return;
-
-	if (t.use_matrix)
-		t.matrix.transformXY(&vertices[0], &vertices[0], (int) vertices.size());
-
 	size_t voffset = vert_offset;
 
+	// Must be before the early exit below.
 	if (!t.append_vertices)
 	{
 		voffset = 0;
+		vert_offset = 0;
 		draw_commands.clear();
 		text_data.clear();
 	}
+
+	if (t.use_matrix)
+		t.matrix.transformXY(&vertices[0], &vertices[0], (int) vertices.size());
 
 	uploadVertices(vertices, voffset);
 

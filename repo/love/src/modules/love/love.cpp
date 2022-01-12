@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -23,6 +23,7 @@
 #include "common/version.h"
 #include "common/deprecation.h"
 #include "common/runtime.h"
+#include "modules/window/Window.h"
 
 #include "love.h"
 
@@ -32,6 +33,12 @@
 
 #ifdef LOVE_WINDOWS
 #include <windows.h>
+
+#if defined(_MSC_VER) && (_MSC_VER < 1900)
+// VS 2013 and earlier doesn't have snprintf
+#define snprintf sprintf_s
+#endif // defined(_MSC_VER) && (_MSC_VER < 1900)
+
 #endif // LOVE_WINDOWS
 
 #ifdef LOVE_ANDROID
@@ -74,9 +81,25 @@ extern "C"
 #	include "audio/Audio.h"
 #endif
 
-// Scripts
+// Scripts.
 #include "scripts/nogame.lua.h"
-#include "scripts/boot.lua.h"
+
+// Put the Lua code directly into a raw string literal.
+static const char arg_lua[] =
+#include "arg.lua"
+;
+
+static const char callbacks_lua[] =
+#include "callbacks.lua"
+;
+
+static const char boot_lua[] =
+#include "boot.lua"
+;
+
+static const char jit_setup_lua[] =
+#include "jitsetup.lua"
+;
 
 // All modules define a c-accessible luaopen
 // so let's make use of those, instead
@@ -141,6 +164,9 @@ extern "C"
 	extern int luaopen_love_window(lua_State*);
 #endif
 	extern int luaopen_love_nogame(lua_State*);
+	extern int luaopen_love_jitsetup(lua_State*);
+	extern int luaopen_love_arg(lua_State*);
+	extern int luaopen_love_callbacks(lua_State*);
 	extern int luaopen_love_boot(lua_State*);
 }
 
@@ -203,6 +229,9 @@ static const luaL_Reg modules[] = {
 	{ "love.window", luaopen_love_window },
 #endif
 	{ "love.nogame", luaopen_love_nogame },
+	{ "love.jitsetup", luaopen_love_jitsetup },
+	{ "love.arg", luaopen_love_arg },
+	{ "love.callbacks", luaopen_love_callbacks },
 	{ "love.boot", luaopen_love_boot },
 	{ 0, 0 }
 };
@@ -335,6 +364,14 @@ static int w__setAudioMixWithSystem(lua_State *L)
 	return 1;
 }
 
+static int w__requestRecordingPermission(lua_State *L)
+{
+#ifdef LOVE_ENABLE_AUDIO
+	love::audio::setRequestRecordingPermission((bool) lua_toboolean(L, 1));
+#endif
+	return 0;
+}
+
 static int w_love_setDeprecationOutput(lua_State *L)
 {
 	bool enable = love::luax_checkboolean(L, 1);
@@ -354,8 +391,34 @@ static int w_deprecation__gc(lua_State *)
 	return 0;
 }
 
+static void luax_addcompatibilityalias(lua_State *L, const char *module, const char *name, const char *alias)
+{
+	lua_getglobal(L, module);
+	if (lua_istable(L, -1))
+	{
+		lua_getfield(L, -1, alias);
+		bool hasalias = !lua_isnoneornil(L, -1);
+		lua_pop(L, 1);
+		if (!hasalias)
+		{
+			lua_getfield(L, -1, name);
+			lua_setfield(L, -2, alias);
+		}
+	}
+	lua_pop(L, 1);
+}
+
 int luaopen_love(lua_State *L)
 {
+	// Preload module loaders.
+	for (int i = 0; modules[i].name != nullptr; i++)
+		love::luax_preload(L, modules[i].func, modules[i].name);
+
+	// jitsetup is also loaded in the love executable runlove function. It's
+	// needed here too for threads. Note that it doesn't use the love table.
+	love::luax_require(L, "love.jitsetup");
+	lua_pop(L, 1);
+
 	love::luax_insistpinnedthread(L);
 
 	love::luax_insistglobal(L, "love");
@@ -396,6 +459,8 @@ int luaopen_love(lua_State *L)
 	// module is initialized.
 	lua_pushcfunction(L, w__setAudioMixWithSystem);
 	lua_setfield(L, -2, "_setAudioMixWithSystem");
+	lua_pushcfunction(L, w__requestRecordingPermission);
+	lua_setfield(L, -2, "_requestRecordingPermission");
 
 	lua_newtable(L);
 
@@ -453,13 +518,16 @@ int luaopen_love(lua_State *L)
 		lua_setfield(L, -2, "hasDeprecationOutput");
 	}
 
-	// Preload module loaders.
-	for (int i = 0; modules[i].name != nullptr; i++)
-		love::luax_preload(L, modules[i].func, modules[i].name);
-
 	// Necessary for Data-creating methods to work properly in Data subclasses.
 	love::luax_require(L, "love.data");
 	lua_pop(L, 1);
+
+#if LUA_VERSION_NUM <= 501
+	// These are deprecated in Lua 5.1. LuaJIT 2.1 removes them, but code
+	// written assuming LuaJIT 2.0 or Lua 5.1 is used might still rely on them.
+	luax_addcompatibilityalias(L, "math", "fmod", "mod");
+	luax_addcompatibilityalias(L, "string", "gmatch", "gfind");
+#endif
 
 #ifdef LOVE_ENABLE_LUASOCKET
 	love::luasocket::__open(L);
@@ -469,6 +537,33 @@ int luaopen_love(lua_State *L)
 #endif
 #ifdef LOVE_ENABLE_LUA53
 	love::luax_preload(L, luaopen_luautf8, "utf8");
+#endif
+
+#ifdef LOVE_ENABLE_WINDOW
+	// In some environments, LuaJIT is limited to 2GB and LuaJIT sometimes panic when it
+	// reaches OOM and closes the whole program, leaving the user confused about what's
+	// going on.
+	// We can't recover the state at this point, but it's better to inform user that
+	// something very bad happening instead of silently exiting.
+	// Note that this is not foolproof. In some cases, the whole process crashes by
+	// uncaught exception that LuaJIT throws or simply exit as if calling
+	// love.event.quit("not enough memory")
+	lua_atpanic(L, [](lua_State *L)
+	{
+		using namespace love;
+		using namespace love::window;
+
+		char message[128];
+		Window* windowModule = Module::getInstance<Window>(Module::M_WINDOW);
+
+		snprintf(message, sizeof(message), "PANIC: unprotected error in call to Lua API (%s)", lua_tostring(L, -1));
+
+		if (windowModule)
+			windowModule->showMessageBox("Lua Fatal Error", message, Window::MESSAGEBOX_ERROR, windowModule->isOpen());
+
+		fprintf(stderr, "%s\n", message);
+		return 0;
+	});
 #endif
 
 	return 1;
@@ -569,7 +664,31 @@ int w__setAccelerometerAsJoystick(lua_State *L)
 
 int luaopen_love_nogame(lua_State *L)
 {
-	if (luaL_loadbuffer(L, (const char *)love::nogame_lua, sizeof(love::nogame_lua), "nogame.lua") == 0)
+	if (luaL_loadbuffer(L, (const char *)love::nogame_lua, sizeof(love::nogame_lua), "=[love \"nogame.lua\"]") == 0)
+		lua_call(L, 0, 1);
+
+	return 1;
+}
+
+int luaopen_love_jitsetup(lua_State *L)
+{
+	if (luaL_loadbuffer(L, jit_setup_lua, sizeof(jit_setup_lua), "=[love \"jitsetup.lua\"]") == 0)
+		lua_call(L, 0, 1);
+
+	return 1;
+}
+
+int luaopen_love_arg(lua_State *L)
+{
+	if (luaL_loadbuffer(L, arg_lua, sizeof(arg_lua), "=[love \"arg.lua\"]") == 0)
+		lua_call(L, 0, 1);
+
+	return 1;
+}
+
+int luaopen_love_callbacks(lua_State *L)
+{
+	if (luaL_loadbuffer(L, callbacks_lua, sizeof(callbacks_lua), "=[love \"callbacks.lua\"]") == 0)
 		lua_call(L, 0, 1);
 
 	return 1;
@@ -577,11 +696,8 @@ int luaopen_love_nogame(lua_State *L)
 
 int luaopen_love_boot(lua_State *L)
 {
-	if (luaL_loadbuffer(L, (const char *)love::boot_lua, sizeof(love::boot_lua), "boot.lua") == 0)
+	if (luaL_loadbuffer(L, boot_lua, sizeof(boot_lua), "=[love \"boot.lua\"]") == 0)
 		lua_call(L, 0, 1);
 
 	return 1;
 }
-
-
-

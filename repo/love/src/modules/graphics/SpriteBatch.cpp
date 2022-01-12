@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -196,13 +196,13 @@ void SpriteBatch::setColor(const Colorf &c)
 	cclamped.b = std::min(std::max(c.b, 0.0f), 1.0f);
 	cclamped.a = std::min(std::max(c.a, 0.0f), 1.0f);
 
-	this->color = toColor(cclamped);
+	this->color = toColor32(cclamped);
 }
 
 void SpriteBatch::setColor()
 {
 	color_active = false;
-	color = Color(255, 255, 255, 255);
+	color = Color32(255, 255, 255, 255);
 }
 
 Colorf SpriteBatch::getColor(bool &active) const
@@ -332,7 +332,7 @@ void SpriteBatch::draw(Graphics *gfx, const Matrix4 &m)
 	array_buf->unmap();
 
 	Attributes attributes;
-	Buffers buffers;
+	BufferBindings buffers;
 
 	{
 		buffers.set(0, array_buf, 0);
@@ -357,7 +357,7 @@ void SpriteBatch::draw(Graphics *gfx, const Matrix4 &m)
 
 		// If the attribute is one of the LOVE-defined ones, use the constant
 		// attribute index for it, otherwise query the index from the shader.
-		VertexAttribID builtinattrib;
+		BuiltinVertexAttribute builtinattrib;
 		if (vertex::getConstant(it.first.c_str(), builtinattrib))
 			attributeindex = (int) builtinattrib;
 		else if (Shader::current)
@@ -374,9 +374,10 @@ void SpriteBatch::draw(Graphics *gfx, const Matrix4 &m)
 			uint16 offset = (uint16) mesh->getAttributeOffset(it.second.index);
 			uint16 stride = (uint16) mesh->getVertexStride();
 
-			attributes.set(attributeindex, format.type, format.components, offset, stride, activebuffers);
+			attributes.set(attributeindex, format.type, (uint8) format.components, offset, activebuffers);
+			attributes.setBufferLayout(activebuffers, stride);
 
-			// TODO: Ideally we want to reuse buffers with the same stride+step.
+			// TODO: We should reuse buffer bindings with the same buffer+stride+step.
 			buffers.set(activebuffers, mesh->vertexBuffer, 0);
 			activebuffers++;
 		}

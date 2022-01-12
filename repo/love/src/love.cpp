@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -79,40 +79,42 @@ static void get_app_arguments(int argc, char **argv, int &new_argc, char **&new_
 			temp_argv.push_back(std::string(argv[i]));
 	}
 
-#ifdef LOVE_MACOSX
-	// Check for a drop file string, if the app wasn't launched in a terminal.
-	// Checking for the terminal is a pretty big hack, but works around an issue
-	// where OS X will switch Spaces if the terminal launching love is in its
-	// own full-screen Space.
-	std::string dropfilestr;
-	if (!isatty(STDIN_FILENO))
-		dropfilestr = love::macosx::checkDropEvents();
-
-	if (!dropfilestr.empty())
-		temp_argv.insert(temp_argv.begin() + 1, dropfilestr);
-	else
-#endif
-	{
-		// If it exists, add the love file in love.app/Contents/Resources/ to argv.
-		std::string loveResourcesPath;
-		bool fused = true;
+	// If it exists, add the love file in love.app/Contents/Resources/ to argv.
+	std::string loveResourcesPath;
+	bool fused = true;
 #if defined(LOVE_MACOSX)
-		loveResourcesPath = love::macosx::getLoveInResources();
+	loveResourcesPath = love::macosx::getLoveInResources();
 #elif defined(LOVE_IOS)
-		loveResourcesPath = love::ios::getLoveInResources(fused);
+	loveResourcesPath = love::ios::getLoveInResources(fused);
 #elif defined(LOVE_NX)
-		loveResourcesPath = love::nx::getLoveInResources(fused);
+	loveResourcesPath = love::nx::getLoveInResources(fused);
 #endif
-		if (!loveResourcesPath.empty())
-		{
-			std::vector<std::string>::iterator it = temp_argv.begin();
-			it = temp_argv.insert(it + 1, loveResourcesPath);
+	if (!loveResourcesPath.empty())
+	{
+		std::vector<std::string>::iterator it = temp_argv.begin();
+		it = temp_argv.insert(it + 1, loveResourcesPath);
 
-			// Run in pseudo-fused mode.
-			if (fused)
-				temp_argv.insert(it + 1, std::string("--fused"));
+		// Run in pseudo-fused mode.
+		if (fused)
+			temp_argv.insert(it + 1, std::string("--fused"));
+	}
+#ifdef LOVE_MACOSX
+	else
+	{
+		// Check for a drop file string, if the app wasn't launched in a
+		// terminal. Checking for the terminal is a pretty big hack, but works
+		// around an issue where OS X will switch Spaces if the terminal
+		// launching love is in its own full-screen Space.
+		if (!isatty(STDIN_FILENO))
+		{
+			// Static to keep the same value after love.event.equit("restart").
+			static std::string dropfilestr = love::macosx::checkDropEvents();
+			if (!dropfilestr.empty())
+				temp_argv.insert(temp_argv.begin() + 1, dropfilestr);
 		}
 	}
+#endif
+
 	// Copy temp argv vector to new argv array.
 	new_argc = (int) temp_argv.size();
 	new_argv = new char *[new_argc+1];
@@ -146,14 +148,6 @@ enum DoneAction
 
 static DoneAction runlove(int argc, char **argv, int &retval)
 {
-#ifdef LOVE_LEGENDARY_APP_ARGV_HACK
-	int hack_argc = 0;
-	char **hack_argv = 0;
-	get_app_arguments(argc, argv, hack_argc, hack_argv);
-	argc = hack_argc;
-	argv = hack_argv;
-#endif // LOVE_LEGENDARY_APP_ARGV_HACK
-
 	// Oh, you just want the version? Okay!
 	if (argc > 1 && strcmp(argv[1], "--version") == 0)
 	{
@@ -169,6 +163,22 @@ static DoneAction runlove(int argc, char **argv, int &retval)
 	// Create the virtual machine.
 	lua_State *L = luaL_newstate();
 	luaL_openlibs(L);
+
+	// LuaJIT-specific setup needs to be done as early as possible - before
+	// get_app_arguments because that loads external library code. This is also
+	// loaded inside require("love"). Note that it doesn't use the love table.
+	love_preload(L, luaopen_love_jitsetup, "love.jitsetup");
+	lua_getglobal(L, "require");
+	lua_pushstring(L, "love.jitsetup");
+	lua_call(L, 1, 0);
+
+#ifdef LOVE_LEGENDARY_APP_ARGV_HACK
+	int hack_argc = 0;
+	char **hack_argv = nullptr;
+	get_app_arguments(argc, argv, hack_argc, hack_argv);
+	argc = hack_argc;
+	argv = hack_argv;
+#endif // LOVE_LEGENDARY_APP_ARGV_HACK
 
 	// Add love to package.preload for easy requiring.
 	love_preload(L, luaopen_love, "love");
@@ -220,8 +230,13 @@ static DoneAction runlove(int argc, char **argv, int &retval)
 	lua_newthread(L);
 	lua_pushvalue(L, -2);
 	int stackpos = lua_gettop(L);
-	while (love::luax_resume(L, 0) == LUA_YIELD)
+	int nres;
+	while (love::luax_resume(L, 0, &nres) == LUA_YIELD)
+#if LUA_VERSION_NUM >= 504
+		lua_pop(L, nres);
+#else
 		lua_pop(L, lua_gettop(L) - stackpos);
+#endif
 
 	retval = 0;
 	DoneAction done = DONE_QUIT;

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -177,7 +177,7 @@ void ParticleSystem::resetOffset()
 	else
 	{
 		Quad::Viewport v = quads[0]->getViewport();
-		offset = love::Vector2(v.x*0.5f, v.y*0.5f);
+		offset = love::Vector2(v.w*0.5f, v.h*0.5f);
 	}
 }
 
@@ -1062,7 +1062,7 @@ void ParticleSystem::draw(Graphics *gfx, const Matrix4 &m)
 
 		// Particle colors are stored as floats (0-1) but vertex colors are
 		// unsigned bytes (0-255).
-		Color c = toColor(p->color);
+		Color32 c = toColor32(p->color);
 
 		// set the texture coordinate and color data for particle vertices
 		for (int v = 0; v < 4; v++)
@@ -1076,11 +1076,11 @@ void ParticleSystem::draw(Graphics *gfx, const Matrix4 &m)
 		p = p->next;
 	}
 
-	Graphics::TempTransform transform(gfx, m);
-
 	buffer->unmap();
 
-	vertex::Buffers vertexbuffers;
+	Graphics::TempTransform transform(gfx, m);
+
+	vertex::BufferBindings vertexbuffers;
 	vertexbuffers.set(0, buffer, 0);
 
 	gfx->drawQuads(0, pCount, vertexAttributes, vertexbuffers, texture);

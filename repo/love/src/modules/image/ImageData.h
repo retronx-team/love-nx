@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -25,7 +25,8 @@
 #include "common/StringMap.h"
 #include "common/int.h"
 #include "common/pixelformat.h"
-#include "common/halffloat.h"
+#include "common/floattypes.h"
+#include "common/Color.h"
 #include "filesystem/FileData.h"
 #include "thread/threads.h"
 #include "ImageDataBase.h"
@@ -38,20 +39,25 @@ namespace love
 namespace image
 {
 
-union Pixel
-{
-	uint8  rgba8[4];
-	uint16 rgba16[4];
-	half   rgba16f[4];
-	float  rgba32f[4];
-};
-
 /**
  * Represents raw pixel data.
  **/
 class ImageData : public ImageDataBase
 {
 public:
+
+	union Pixel
+	{
+		uint8   rgba8[4];
+		uint16  rgba16[4];
+		float16 rgba16f[4];
+		float   rgba32f[4];
+		uint16  packed16;
+		uint32  packed32;
+	};
+
+	typedef void (*PixelSetFunction)(const Colorf &c, Pixel *p);
+	typedef void (*PixelGetFunction)(const Pixel *p, Colorf &c);
 
 	static love::Type type;
 
@@ -86,7 +92,7 @@ public:
 	 * @param y The location along the y-axis.
 	 * @param p The color to use for the given location.
 	 **/
-	void setPixel(int x, int y, const Pixel &p);
+	void setPixel(int x, int y, const Colorf &p);
 
 	/**
 	 * Gets the pixel at location (x,y).
@@ -94,7 +100,8 @@ public:
 	 * @param y The location along the y-axis.
 	 * @return The color for the given location.
 	 **/
-	void getPixel(int x, int y, Pixel &p) const;
+	void getPixel(int x, int y, Colorf &c) const;
+	Colorf getPixel(int x, int y) const;
 
 	/**
 	 * Encodes raw pixel data into a given format.
@@ -113,7 +120,14 @@ public:
 
 	size_t getPixelSize() const;
 
+	PixelSetFunction getPixelSetFunction() const { return pixelSetFunction; }
+	PixelGetFunction getPixelGetFunction() const { return pixelGetFunction; }
+
 	static bool validPixelFormat(PixelFormat format);
+	static bool canPaste(PixelFormat src, PixelFormat dst);
+
+	static PixelSetFunction getPixelSetFunction(PixelFormat format);
+	static PixelGetFunction getPixelGetFunction(PixelFormat format);
 
 	static bool getConstant(const char *in, FormatHandler::EncodedFormat &out);
 	static bool getConstant(FormatHandler::EncodedFormat in, const char *&out);
@@ -135,6 +149,9 @@ private:
 	// The format handler that was used to decode the ImageData. We need to know
 	// this so we can properly delete memory allocated by the decoder.
 	StrongRef<FormatHandler> decodeHandler;
+
+	PixelSetFunction pixelSetFunction;
+	PixelGetFunction pixelGetFunction;
 
 	static StringMap<FormatHandler::EncodedFormat, FormatHandler::ENCODED_MAX_ENUM>::Entry encodedFormatEntries[];
 	static StringMap<FormatHandler::EncodedFormat, FormatHandler::ENCODED_MAX_ENUM> encodedFormats;

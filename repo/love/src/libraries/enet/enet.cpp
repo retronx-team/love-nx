@@ -21,8 +21,18 @@
  * THE SOFTWARE.
  */
 
+#ifdef _WIN32
+#define NOMINMAX
+#endif
+
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+#include <stdint.h>
+
+#include <cstdio>
+#include <cstddef>
+#include <algorithm>
 
 extern "C" {
 #define LUA_COMPAT_ALL
@@ -101,10 +111,76 @@ static size_t find_peer_index(lua_State *l, ENetHost *enet_host, ENetPeer *peer)
 	return peer_index;
 }
 
+// VS2013 doesn't support alignof
+#if defined(_MSC_VER) && _MSC_VER <= 1800
+#define ENET_ALIGNOF(x) __alignof(x)
+#else
+#define ENET_ALIGNOF(x) alignof(x)
+#endif
+
+static bool supports_full_lightuserdata(lua_State *L)
+{
+	static bool checked = false;
+	static bool supported = false;
+
+	if (!checked)
+	{
+		lua_pushcclosure(L, [](lua_State* L) -> int
+		{
+			// Try to push pointer with all bits set.
+			lua_pushlightuserdata(L, (void*)(~((size_t)0)));
+			return 1;
+		}, 0);
+
+		supported = lua_pcall(L, 0, 1, 0) == 0;
+		checked = true;
+
+		lua_pop(L, 1);
+	}
+
+	return supported;
+}
+
+static uintptr_t compute_peer_key(lua_State *L, ENetPeer *peer)
+{
+	// ENet peers are be allocated on the heap in an array. Lua numbers
+	// (doubles) can store all possible integers up to 2^53. We can store
+	// pointers that use more than 53 bits if their alignment is guaranteed to
+	// be more than 1. For example an alignment requirement of 8 means we can
+	// shift the pointer's bits by 3.
+	const size_t minalign = std::min(ENET_ALIGNOF(ENetPeer), ENET_ALIGNOF(std::max_align_t));
+	uintptr_t key = (uintptr_t) peer;
+
+	if ((key & (minalign - 1)) != 0)
+	{
+		luaL_error(L, "Cannot push enet peer to Lua: unexpected alignment "
+				   "(pointer is %p but alignment should be %d)", peer, minalign);
+	}
+
+	static const size_t shift = (size_t) log2((double) minalign);
+
+	return key >> shift;
+}
+
+static void push_peer_key(lua_State *L, uintptr_t key)
+{
+	// If full 64-bit lightuserdata is supported, always use that. Otherwise,
+	// if the key is smaller than 2^53 (which is integer precision for double
+	// datatype), then push number. Otherwise, throw error.
+	if (supports_full_lightuserdata(L))
+		lua_pushlightuserdata(L, (void*) key);
+	else if (key > 0x20000000000000ULL) // 2^53
+		luaL_error(L, "Cannot push enet peer to Lua: pointer value %p is too large", key);
+	else
+		lua_pushnumber(L, (lua_Number) key);
+}
+
 static void push_peer(lua_State *l, ENetPeer *peer) {
+	uintptr_t key = compute_peer_key(l, peer);
+
 	// try to find in peer table
 	lua_getfield(l, LUA_REGISTRYINDEX, "enet_peers");
-	lua_pushlightuserdata(l, peer);
+	push_peer_key(l, key);
 	lua_gettable(l, -2);
 
 	if (lua_isnil(l, -1)) {
@@ -115,7 +191,7 @@ static void push_peer(lua_State *l, ENetPeer *peer) {
 		luaL_getmetatable(l, "enet_peer");
 		lua_setmetatable(l, -2);
 
-		lua_pushlightuserdata(l, peer);
+		push_peer_key(l, key);
 		lua_pushvalue(l, -2);
 
 		lua_settable(l, -4);

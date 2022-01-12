@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2020 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -954,7 +954,7 @@ int w_newVolumeImage(lua_State *L)
 
 				for (int slice = 0; slice < slicelen; slice++)
 				{
-					lua_rawgeti(L, -1, mip + 1);
+					lua_rawgeti(L, -1, slice + 1);
 
 					auto data = getImageData(L, -1, true, slice == 0 && mip == 0 ? autodpiscale : nullptr);
 					if (data.first.get())
@@ -3075,12 +3075,12 @@ extern "C" int luaopen_love_graphics(lua_State *L)
 
 	int n = luax_register_module(L, w);
 
-	if (luaL_loadbuffer(L, (const char *)graphics_lua, sizeof(graphics_lua), "wrap_Graphics.lua") == 0)
+	if (luaL_loadbuffer(L, (const char *)graphics_lua, sizeof(graphics_lua), "=[love \"wrap_Graphics.lua\"]") == 0)
 		lua_call(L, 0, 0);
 	else
 		lua_error(L);
 
-	if (luaL_loadbuffer(L, (const char *)graphics_shader_lua, sizeof(graphics_shader_lua), "wrap_GraphicsShader.lua") == 0)
+	if (luaL_loadbuffer(L, (const char *)graphics_shader_lua, sizeof(graphics_shader_lua), "=[love \"wrap_GraphicsShader.lua\"]") == 0)
 		lua_call(L, 0, 0);
 	else
 		lua_error(L);

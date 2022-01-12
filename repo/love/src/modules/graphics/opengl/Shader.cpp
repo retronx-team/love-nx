@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -333,7 +333,7 @@ bool Shader::loadVolatile()
 	for (int i = 0; i < int(ATTRIB_MAX_ENUM); i++)
 	{
 		const char *name = nullptr;
-		if (vertex::getConstant((VertexAttribID) i, name))
+		if (vertex::getConstant((BuiltinVertexAttribute) i, name))
 			glBindAttribLocation(program, i, (const GLchar *) name);
 	}
 
@@ -356,7 +356,7 @@ bool Shader::loadVolatile()
 	for (int i = 0; i < int(ATTRIB_MAX_ENUM); i++)
 	{
 		const char *name = nullptr;
-		if (vertex::getConstant(VertexAttribID(i), name))
+		if (vertex::getConstant(BuiltinVertexAttribute(i), name))
 			builtinAttributes[i] = glGetAttribLocation(program, name);
 		else
 			builtinAttributes[i] = -1;
@@ -451,7 +451,7 @@ void Shader::attach()
 		{
 			const TextureUnit &unit = textureUnits[i];
 			if (unit.active)
-				gl.bindTextureToUnit(unit.type, unit.texture, i, false);
+				gl.bindTextureToUnit(unit.type, unit.texture, i, false, false);
 		}
 
 		// send any pending uniforms to the shader program.
@@ -647,7 +647,7 @@ void Shader::sendTextures(const UniformInfo *info, Texture **textures, int count
 		int texunit = info->ints[i];
 
 		if (shaderactive)
-			gl.bindTextureToUnit(info->textureType, gltex, texunit, false);
+			gl.bindTextureToUnit(info->textureType, gltex, texunit, false, false);
 
 		// Store texture id so it can be re-bound to the texture unit later.
 		textureUnits[texunit].texture = gltex;

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -191,14 +191,15 @@ bool Graphics::setMode(int width, int height, int pixelwidth, int pixelheight, b
 
 	// Set pixel row alignment
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
 
 	// Always enable seamless cubemap filtering when possible.
 	if (GLAD_VERSION_3_2 || GLAD_ARB_seamless_cube_map)
 		glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
 	// Set whether drawing converts input from linear -> sRGB colorspace.
-	if (GLAD_VERSION_3_0 || GLAD_ARB_framebuffer_sRGB || GLAD_EXT_framebuffer_sRGB
-		|| GLAD_ES_VERSION_3_0 || GLAD_EXT_sRGB)
+	if (!gl.bugs.brokenSRGB && (GLAD_VERSION_3_0 || GLAD_ARB_framebuffer_sRGB
+		|| GLAD_EXT_framebuffer_sRGB || GLAD_ES_VERSION_3_0 || GLAD_EXT_sRGB))
 	{
 		if (GLAD_VERSION_1_0 || GLAD_EXT_sRGB_write_control)
 			gl.setEnableState(OpenGL::ENABLE_FRAMEBUFFER_SRGB, isGammaCorrect());
@@ -343,7 +344,7 @@ void Graphics::draw(const DrawIndexedCommand &cmd)
 	++drawCalls;
 }
 
-static inline void advanceVertexOffsets(const vertex::Attributes &attributes, vertex::Buffers &buffers, int vertexcount)
+static inline void advanceVertexOffsets(const vertex::Attributes &attributes, vertex::BufferBindings &buffers, int vertexcount)
 {
 	// TODO: Figure out a better way to avoid touching the same buffer multiple
 	// times, if multiple attributes share the buffer.
@@ -356,16 +357,17 @@ static inline void advanceVertexOffsets(const vertex::Attributes &attributes, ve
 
 		auto &attrib = attributes.attribs[i];
 
-		uint32 bufferbit = 1u << attrib.bufferindex;
+		uint32 bufferbit = 1u << attrib.bufferIndex;
 		if ((touchedbuffers & bufferbit) == 0)
 		{
 			touchedbuffers |= bufferbit;
-			buffers.info[attrib.bufferindex].offset += attrib.stride * vertexcount;
+			const auto &layout = attributes.bufferLayouts[attrib.bufferIndex];
+			buffers.info[attrib.bufferIndex].offset += layout.stride * vertexcount;
 		}
 	}
 }
 
-void Graphics::drawQuads(int start, int count, const vertex::Attributes &attributes, const vertex::Buffers &buffers, love::graphics::Texture *texture)
+void Graphics::drawQuads(int start, int count, const vertex::Attributes &attributes, const vertex::BufferBindings &buffers, love::graphics::Texture *texture)
 {
 	const int MAX_VERTICES_PER_DRAW = LOVE_UINT16_MAX;
 	const int MAX_QUADS_PER_DRAW    = MAX_VERTICES_PER_DRAW / 4;
@@ -394,7 +396,7 @@ void Graphics::drawQuads(int start, int count, const vertex::Attributes &attribu
 	}
 	else
 	{
-		vertex::Buffers bufferscopy = buffers;
+		vertex::BufferBindings bufferscopy = buffers;
 		if (start > 0)
 			advanceVertexOffsets(attributes, bufferscopy, start * 4);
 
@@ -585,10 +587,6 @@ void Graphics::endPass()
 		if (rt.canvas->getMipmapMode() == Canvas::MIPMAPS_AUTO && rt.mipmap == 0)
 			rt.canvas->generateMipmaps();
 	}
-
-	int dsmipmap = rts.depthStencil.mipmap;
-	if (depthstencil != nullptr && depthstencil->getMipmapMode() == Canvas::MIPMAPS_AUTO && dsmipmap == 0)
-		depthstencil->generateMipmaps();
 }
 
 void Graphics::clear(OptionalColorf c, OptionalInt stencil, OptionalDouble depth)

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -449,6 +449,25 @@ void JoystickModule::loadGamepadMappings(const std::string &mappings)
 	// produce an empty string if there are no recently seen gamepads to save.
 	if (!success && !mappings.empty())
 		throw love::Exception("Invalid gamepad mappings.");
+}
+
+std::string JoystickModule::getGamepadMappingString(const std::string &guid) const
+{
+	SDL_JoystickGUID sdlguid = SDL_JoystickGetGUIDFromString(guid.c_str());
+
+	char *sdlmapping = SDL_GameControllerMappingForGUID(sdlguid);
+	if (sdlmapping == nullptr)
+		return "";
+
+	std::string mapping(sdlmapping);
+	SDL_free(sdlmapping);
+
+	// Matches SDL_GameControllerAddMappingsFromRW.
+	if (mapping.find_last_of(',') != mapping.length() - 1)
+		mapping += ",";
+	mapping += "platform:" + std::string(SDL_GetPlatform());
+
+	return mapping;
 }
 
 std::string JoystickModule::saveGamepadMappings()

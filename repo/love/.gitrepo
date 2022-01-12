@@ -6,7 +6,7 @@
 [subrepo]
 	remote = https://github.com/love2d/love
 	branch = master
-	commit = d700800888cc8dc0fb6e8f8780afba7f33247149
+	commit = 334b674f121b9fd226ddad8f4ad5d90f6b451b3e
 	parent = ca768a8378b48f0dc3b9a96427c26aa8e9b4a68f
 	method = merge
-	cmdver = 0.4.0
+	cmdver = 0.4.3

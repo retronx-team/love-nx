@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2020 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -498,9 +498,9 @@ extern "C" int luaopen_love_math(lua_State *L)
 	int n = luax_register_module(L, w);
 
 	// Execute wrap_Math.lua, sending the math table and ffifuncs pointer as args.
-	luaL_loadbuffer(L, math_lua, sizeof(math_lua), "wrap_Math.lua");
+	luaL_loadbuffer(L, math_lua, sizeof(math_lua), "=[love \"wrap_Math.lua\"]");
 	lua_pushvalue(L, -2);
-	lua_pushlightuserdata(L, &ffifuncs);
+	luax_pushpointerasstring(L, &ffifuncs);
 	lua_call(L, 2, 0);
 
 	return n;

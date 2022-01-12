@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2020 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -132,21 +132,14 @@ int w_File_read(lua_State *L)
 		return luax_ioError(L, "%s", e.what());
 	}
 
-	int nret = 0;
-
 	if (ctype == love::data::CONTAINER_DATA)
-	{
 		luax_pushtype(L, d.get());
-		nret = 1;
-	}
 	else
-	{
 		lua_pushlstring(L, (const char *) d->getData(), d->getSize());
-		lua_pushinteger(L, d->getSize());
-		nret = 2;
-	}
 
-	return nret;
+	lua_pushinteger(L, d->getSize());
+
+	return 2;
 }
 
 int w_File_write(lua_State *L)

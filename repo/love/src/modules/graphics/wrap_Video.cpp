@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2020 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -168,7 +168,7 @@ int luaopen_video(lua_State *L)
 {
 	int ret = luax_register_type(L, &Video::type, functions, nullptr);
 
-	luaL_loadbuffer(L, video_lua, sizeof(video_lua), "Video.lua");
+	luaL_loadbuffer(L, video_lua, sizeof(video_lua), "=[love \"Video.lua\"]");
 	luax_gettypemetatable(L, Video::type);
 	lua_call(L, 1, 0);
 

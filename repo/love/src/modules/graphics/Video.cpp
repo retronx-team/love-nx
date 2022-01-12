@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -42,7 +42,7 @@ Video::Video(Graphics *gfx, love::video::VideoStream *stream, float dpiscale)
 	stream->fillBackBuffer();
 
 	for (int i = 0; i < 4; i++)
-		vertices[i].color = Color(255, 255, 255, 255);
+		vertices[i].color = Color32(255, 255, 255, 255);
 
 	// Vertices are ordered for use with triangle strips:
 	// 0---2
@@ -96,6 +96,8 @@ Video::Video(Graphics *gfx, love::video::VideoStream *stream, float dpiscale)
 
 Video::~Video()
 {
+	if (source)
+		source->stop();
 }
 
 love::video::VideoStream *Video::getStream()
@@ -128,7 +130,7 @@ void Video::draw(Graphics *gfx, const Matrix4 &m)
 
 	vertex::STf_RGBAub *verts = (vertex::STf_RGBAub *) data.stream[1];
 
-	Color c = toColor(gfx->getColor());
+	Color32 c = toColor32(gfx->getColor());
 
 	for (int i = 0; i < 4; i++)
 	{

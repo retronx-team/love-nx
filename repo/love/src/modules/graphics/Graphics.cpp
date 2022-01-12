@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -1122,7 +1122,7 @@ void Graphics::flushStreamDraws()
 		return;
 
 	Attributes attributes;
-	Buffers buffers;
+	BufferBindings buffers;
 
 	size_t usedsizes[3] = {0, 0, 0};
 
@@ -1140,7 +1140,7 @@ void Graphics::flushStreamDraws()
 		sbstate.vbMap[i] = StreamBuffer::MapInfo();
 	}
 
-	if (attributes.enablebits == 0)
+	if (attributes.enableBits == 0)
 		return;
 
 	Colorf nc = getColor();
@@ -1275,7 +1275,7 @@ void Graphics::points(const Vector2 *positions, const Colorf *colors, size_t num
 	else
 		t.transformXY0((Vector3 *) data.stream[0], positions, cmd.vertexCount);
 
-	Color *colordata = (Color *) data.stream[1];
+	Color32 *colordata = (Color32 *) data.stream[1];
 
 	if (colors)
 	{
@@ -1290,18 +1290,18 @@ void Graphics::points(const Vector2 *positions, const Colorf *colors, size_t num
 				gammaCorrectColor(ci);
 				ci *= nc;
 				unGammaCorrectColor(ci);
-				colordata[i] = toColor(ci);
+				colordata[i] = toColor32(ci);
 			}
 		}
 		else
 		{
 			for (int i = 0; i < cmd.vertexCount; i++)
-				colordata[i] = toColor(nc * colors[i]);
+				colordata[i] = toColor32(nc * colors[i]);
 		}
 	}
 	else
 	{
-		Color c = toColor(getColor());
+		Color32 c = toColor32(getColor());
 
 		for (int i = 0; i < cmd.vertexCount; i++)
 			colordata[i] = c;
@@ -1350,7 +1350,7 @@ void Graphics::rectangle(DrawMode mode, float x, float y, float w, float h)
 
 void Graphics::rectangle(DrawMode mode, float x, float y, float w, float h, float rx, float ry, int points)
 {
-	if (rx == 0 || ry == 0)
+	if (rx <= 0 || ry <= 0)
 	{
 		rectangle(mode, x, y, w, h);
 		return;
@@ -1409,7 +1409,8 @@ void Graphics::rectangle(DrawMode mode, float x, float y, float w, float h, floa
 
 void Graphics::rectangle(DrawMode mode, float x, float y, float w, float h, float rx, float ry)
 {
-	rectangle(mode, x, y, w, h, rx, ry, calculateEllipsePoints(rx, ry));
+	int points = calculateEllipsePoints(std::min(rx, std::abs(w/2)), std::min(ry, std::abs(h/2)));
+	rectangle(mode, x, y, w, h, rx, ry, points);
 }
 
 void Graphics::circle(DrawMode mode, float x, float y, float radius, int points)
@@ -1571,8 +1572,8 @@ void Graphics::polygon(DrawMode mode, const Vector2 *coords, size_t count, bool 
 		else
 			t.transformXY0((Vector3 *) data.stream[0], coords, cmd.vertexCount);
 
-		Color c = toColor(getColor());
-		Color *colordata = (Color *) data.stream[1];
+		Color32 c = toColor32(getColor());
+		Color32 *colordata = (Color32 *) data.stream[1];
 		for (int i = 0; i < cmd.vertexCount; i++)
 			colordata[i] = c;
 	}

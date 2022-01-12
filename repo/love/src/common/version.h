@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -25,12 +25,12 @@ namespace love
 {
 
 // Version stuff.
-#define LOVE_VERSION_STRING "11.3"
+#define LOVE_VERSION_STRING "11.4"
 static const int VERSION_MAJOR = 11;
-static const int VERSION_MINOR = 3;
+static const int VERSION_MINOR = 4;
 static const int VERSION_REV = 0;
 static const char *VERSION = LOVE_VERSION_STRING;
-static const char *VERSION_COMPATIBILITY[] =  { VERSION, "11.0", "11.1", "11.2", 0 };
+static const char *VERSION_COMPATIBILITY[] =  { VERSION, "11.0", "11.1", "11.2", "11.3", 0 };
 static const char *VERSION_CODENAME = "Mysterious Mysteries";
 
 } // love

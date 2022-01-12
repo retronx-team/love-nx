@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -301,6 +301,33 @@ Joystick::JoystickInput Joystick::getGamepadMapping(const GamepadInput &input) c
 	return jinput;
 }
 
+std::string Joystick::getGamepadMappingString() const
+{
+	char *sdlmapping = nullptr;
+
+	if (controller != nullptr)
+		sdlmapping = SDL_GameControllerMapping(controller);
+
+	if (sdlmapping == nullptr)
+	{
+		SDL_JoystickGUID sdlguid = SDL_JoystickGetGUIDFromString(pguid.c_str());
+		sdlmapping = SDL_GameControllerMappingForGUID(sdlguid);
+	}
+
+	if (sdlmapping == nullptr)
+		return "";
+
+	std::string mappingstr(sdlmapping);
+	SDL_free(sdlmapping);
+
+	// Matches SDL_GameControllerAddMappingsFromRW.
+	if (mappingstr.find_last_of(',') != mappingstr.length() - 1)
+		mappingstr += ",";
+	mappingstr += "platform:" + std::string(SDL_GetPlatform());
+
+	return mappingstr;
+}
+
 void *Joystick::getHandle() const
 {
 	return joyhandle;
@@ -365,6 +392,11 @@ bool Joystick::checkCreateHaptic()
 
 bool Joystick::isVibrationSupported()
 {
+#if SDL_VERSION_ATLEAST(2, 0, 18)
+	if (isConnected() && SDL_JoystickHasRumble(joyhandle) == SDL_TRUE)
+		return true;
+#endif
+
 	if (!checkCreateHaptic())
 		return false;
 
@@ -415,8 +447,12 @@ bool Joystick::setVibration(float left, float right, float duration)
 	if (left == 0.0f && right == 0.0f)
 		return setVibration();
 
-	if (!checkCreateHaptic())
+	if (!isConnected())
+	{
+		vibration.left = vibration.right = 0.0f;
+		vibration.endtime = SDL_HAPTIC_INFINITY;
 		return false;
+	}
 
 	Uint32 length = SDL_HAPTIC_INFINITY;
 	if (duration >= 0.0f)
@@ -426,10 +462,19 @@ bool Joystick::setVibration(float left, float right, float duration)
 	}
 
 	bool success = false;
+
+#if SDL_VERSION_ATLEAST(2, 0, 9)
+	if (SDL_JoystickRumble(joyhandle, (Uint16)(left * LOVE_UINT16_MAX), (Uint16)(right * LOVE_UINT16_MAX), length) == 0)
+		success = true;
+#endif
+
+	if (!success && !checkCreateHaptic())
+		return false;
+
 	unsigned int features = SDL_HapticQuery(haptic);
 	int axes = SDL_HapticNumAxes(haptic);
 
-	if ((features & SDL_HAPTIC_LEFTRIGHT) != 0)
+	if (!success && (features & SDL_HAPTIC_LEFTRIGHT) != 0)
 	{
 		memset(&vibration.effect, 0, sizeof(SDL_HapticEffect));
 		vibration.effect.type = SDL_HAPTIC_LEFTRIGHT;
@@ -501,9 +546,14 @@ bool Joystick::setVibration(float left, float right, float duration)
 
 bool Joystick::setVibration()
 {
-	bool success = true;
+	bool success = false;
 
-	if (SDL_WasInit(SDL_INIT_HAPTIC) && haptic && SDL_HapticIndex(haptic) != -1)
+#if SDL_VERSION_ATLEAST(2, 0, 9)
+	if (!success)
+		success = isConnected() && SDL_JoystickRumble(joyhandle, 0, 0, 0) == 0;
+#endif
+
+	if (!success && SDL_WasInit(SDL_INIT_HAPTIC) && haptic && SDL_HapticIndex(haptic) != -1)
 		success = (SDL_HapticStopEffect(haptic, vibration.id) == 0);
 
 	if (success)

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2006-2019 LOVE Development Team
+# Copyright (c) 2006-2022 LOVE Development Team
 #
 # This software is provided 'as-is', without any express or implied
 # warranty.  In no event will the authors be held liable for any damages
@@ -283,8 +283,8 @@ set(LOVE_SRC_COMMON
 	src/common/EnumMap.h
 	src/common/Exception.cpp
 	src/common/Exception.h
-	src/common/halffloat.cpp
-	src/common/halffloat.h
+	src/common/floattypes.cpp
+	src/common/floattypes.h
 	src/common/int.h
 	src/common/math.h
 	src/common/Matrix.cpp

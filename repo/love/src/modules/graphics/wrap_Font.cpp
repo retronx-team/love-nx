@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2020 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -87,7 +87,6 @@ int w_Font_getWidth(lua_State *L)
 {
 	Font *t = luax_checkfont(L, 1);
 	const char *str = luaL_checkstring(L, 2);
-
 	luax_catchexcept(L, [&](){ lua_pushinteger(L, t->getWidth(str)); });
 	return 1;
 }
@@ -214,6 +213,30 @@ int w_Font_hasGlyphs(lua_State *L)
 	return 1;
 }
 
+int w_Font_getKerning(lua_State *L)
+{
+	Font *t = luax_checkfont(L, 1);
+	float kerning = 0.0f;
+
+	luax_catchexcept(L, [&]() {
+		if (lua_type(L, 2) == LUA_TSTRING)
+		{
+			std::string left = luax_checkstring(L, 2);
+			std::string right = luax_checkstring(L, 3);
+			kerning = t->getKerning(left, right);
+		}
+		else
+		{
+			uint32 left = (uint32) luaL_checknumber(L, 2);
+			uint32 right = (uint32) luaL_checknumber(L, 3);
+			kerning = t->getKerning(left, right);
+		}
+	});
+
+	lua_pushnumber(L, kerning);
+	return 1;
+}
+
 int w_Font_setFallbacks(lua_State *L)
 {
 	Font *t = luax_checkfont(L, 1);
@@ -246,6 +269,7 @@ static const luaL_Reg w_Font_functions[] =
 	{ "getDescent", w_Font_getDescent },
 	{ "getBaseline", w_Font_getBaseline },
 	{ "hasGlyphs", w_Font_hasGlyphs },
+	{ "getKerning", w_Font_getKerning },
 	{ "setFallbacks", w_Font_setFallbacks },
 	{ "getDPIScale", w_Font_getDPIScale },
 	{ 0, 0 }

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -406,7 +406,12 @@ public:
 		if (!alignedMalloc((void **) &data, alignedSize, alignment))
 			throw love::Exception("Out of memory.");
 
-		loadVolatile();
+		if (!loadVolatile())
+		{
+			ptrdiff_t pointer = (ptrdiff_t) data;
+			alignedFree(data);
+			throw love::Exception("AMD Pinned Memory StreamBuffer implementation failed to create buffer (address: %p, alignment: %ld, aiigned size: %ld)", pointer, alignment, alignedSize);
+		}
 	}
 
 	~StreamBufferPinnedMemory()
@@ -441,8 +446,18 @@ public:
 
 		glGenBuffers(1, &vbo);
 
+		while (glGetError() != GL_NO_ERROR)
+			/* Clear errors. */;
+
 		glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, vbo);
 		glBufferData(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, alignedSize, data, GL_STREAM_DRAW);
+
+		if (glGetError() != GL_NO_ERROR)
+		{
+			gl.deleteBuffer(vbo);
+			vbo = 0;
+			return false;
+		}
 
 		frameGPUReadOffset = 0;
 		frameIndex = 0;
@@ -454,12 +469,9 @@ public:
 	{
 		if (vbo != 0)
 		{
-			// Make sure the GPU has completed work using the memory before
-			// freeing it. TODO: Do we need a full glFinish() or is this
-			// sufficient?
-			glFlush();
-			for (FenceSync &sync : syncs)
-				sync.cpuWait();
+			// Make sure the GPU has completed all work before freeing the
+			// memory. glFlush+sync.cpuWait doesn't seem to be enough.
+			glFinish();
 
 			gl.bindBuffer(mode, vbo);
 			gl.deleteBuffer(vbo);
@@ -487,9 +499,23 @@ love::graphics::StreamBuffer *CreateStreamBuffer(BufferType mode, size_t size)
 		{
 			// AMD's pinned memory seems to be faster than persistent mapping,
 			// on AMD GPUs.
-			if (GLAD_AMD_pinned_memory)
-				return new StreamBufferPinnedMemory(mode, size);
-			else if (GLAD_VERSION_4_4 || GLAD_ARB_buffer_storage)
+			if (GLAD_AMD_pinned_memory && gl.getVendor() == OpenGL::VENDOR_AMD)
+			{
+				try
+				{
+					return new StreamBufferPinnedMemory(mode, size);
+				}
+				catch (love::Exception &)
+				{
+					// According to the spec, pinned memory can fail if the RAM
+					// allocation can't be mapped to the GPU's address space.
+					// This seems to happen in practice on Mesa + amdgpu:
+					// https://bitbucket.org/rude/love/issues/1540
+					// Fall through to other implementations when that happens.
+				}
+			}
+
+			if (GLAD_VERSION_4_4 || GLAD_ARB_buffer_storage)
 				return new StreamBufferPersistentMapSync(mode, size);
 
 			// Most modern drivers have a separate internal thread which queues

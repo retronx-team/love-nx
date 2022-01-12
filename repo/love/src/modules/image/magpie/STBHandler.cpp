@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -29,6 +29,12 @@ static void loveSTBIAssert(bool test, const char *teststr)
 		throw love::Exception("Could not decode image (stb_image assertion '%s' failed)", teststr);
 }
 
+// Workaround when building for iOS with deployment target=8.0
+#include "common/config.h"
+#if defined(LOVE_IOS)
+#define STBI_NO_THREAD_LOCALS
+#endif
+
 // stb_image
  #define STBI_ONLY_JPEG
 // #define STBI_ONLY_PNG
@@ -50,7 +56,7 @@ namespace image
 namespace magpie
 {
 
-static_assert(sizeof(Color) == 4, "sizeof(Color) must equal 4 bytes!");
+static_assert(sizeof(Color32) == 4, "sizeof(Color32) must equal 4 bytes!");
 
 bool STBHandler::canDecode(Data *data)
 {
@@ -147,7 +153,7 @@ FormatHandler::EncodedImage STBHandler::encode(const DecodedImage &img, EncodedF
 	memcpy(encimg.data + headerlen, img.data, img.width * img.height * bpp);
 
 	// convert the pixels from RGBA to BGRA.
-	Color *encodedpixels = (Color *) (encimg.data + headerlen);
+	Color32 *encodedpixels = (Color32 *) (encimg.data + headerlen);
 	for (int y = 0; y < img.height; y++)
 	{
 		for (int x = 0; x < img.width; x++)

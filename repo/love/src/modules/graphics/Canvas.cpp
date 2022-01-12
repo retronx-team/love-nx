@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -69,6 +69,9 @@ Canvas::Canvas(const Settings &settings)
 		filter.mipmap = defaultMipmapFilter;
 	}
 
+	if (settings.mipmaps == MIPMAPS_AUTO && isPixelFormatDepthStencil(format))
+		throw love::Exception("Automatic mipmap generation cannot be used for depth/stencil Canvases.");
+
 	auto gfx = Module::getInstance<Graphics>(Module::M_GRAPHICS);
 	const Graphics::Capabilities &caps = gfx->getCapabilities();
 
@@ -137,26 +140,15 @@ love::image::ImageData *Canvas::newImageData(love::image::Image *module, int sli
 	if (gfx != nullptr && gfx->isCanvasActive(this))
 		throw love::Exception("Canvas:newImageData cannot be called while that Canvas is currently active.");
 
-	PixelFormat dataformat;
-	switch (getPixelFormat())
-	{
-	case PIXELFORMAT_RGB10A2: // FIXME: Conversions aren't supported in GLES
-		dataformat = PIXELFORMAT_RGBA16;
-		break;
-	case PIXELFORMAT_R16F:
-	case PIXELFORMAT_RG16F:
-	case PIXELFORMAT_RGBA16F:
-	case PIXELFORMAT_RG11B10F: // FIXME: Conversions aren't supported in GLES
-		dataformat = PIXELFORMAT_RGBA16F;
-		break;
-	case PIXELFORMAT_R32F:
-	case PIXELFORMAT_RG32F:
-	case PIXELFORMAT_RGBA32F:
-		dataformat = PIXELFORMAT_RGBA32F;
-		break;
-	default:
+	PixelFormat dataformat = getPixelFormat();
+	if (dataformat == PIXELFORMAT_sRGBA8)
 		dataformat = PIXELFORMAT_RGBA8;
-		break;
+
+	if (!image::ImageData::validPixelFormat(dataformat))
+	{
+		const char *formatname = "unknown";
+		love::getConstant(dataformat, formatname);
+		throw love::Exception("ImageData with the '%s' pixel format is not supported.", formatname);
 	}
 
 	return module->newImageData(r.w, r.h, dataformat);

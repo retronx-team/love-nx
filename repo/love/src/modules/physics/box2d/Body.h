@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -316,6 +316,12 @@ public:
 	 * @param[out] y_o The y-coordinate of the vector in local coordinates.
 	 **/
 	void getLocalVector(float x, float y, float &x_o, float &y_o);
+
+	/**
+	 * Transforms a series of points (x, y) from world coordinates
+	 * to local coordinates.
+	 **/
+	int getLocalPoints(lua_State *L);
 
 	/**
 	 * Gets the velocity on the Body for the given world point.

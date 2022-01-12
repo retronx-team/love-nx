@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -31,7 +31,7 @@ namespace graphics
 namespace opengl
 {
 
-static GLenum createFBO(GLuint &framebuffer, TextureType texType, PixelFormat format, GLuint texture, int layers, int mips)
+static GLenum createFBO(GLuint &framebuffer, TextureType texType, PixelFormat format, GLuint texture, int layers, int nb_mips)
 {
 	// get currently bound fbo to reset to it later
 	GLuint current_fbo = gl.getFramebuffer(OpenGL::FRAMEBUFFER_ALL);
@@ -60,7 +60,8 @@ static GLenum createFBO(GLuint &framebuffer, TextureType texType, PixelFormat fo
 		// Make sure all faces and layers of the texture are initialized to
 		// transparent black. This is unfortunately probably pretty slow for
 		// 2D-array and 3D textures with a lot of layers...
-		for (int mip = mips - 1; mip >= 0; mip--)
+		// Iterate backwards to make sure mip/layer/face 0 is bound at the end.
+		for (int mip = nb_mips - 1; mip >= 0; mip--)
 		{
 			int nlayers = layers;
 			if (texType == TEXTURE_VOLUME)
@@ -104,6 +105,7 @@ static GLenum createFBO(GLuint &framebuffer, TextureType texType, PixelFormat fo
 	GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 
 	gl.bindFramebuffer(OpenGL::FRAMEBUFFER_ALL, current_fbo);
+
 	return status;
 }
 
@@ -260,8 +262,18 @@ bool Canvas::loadVolatile()
 			return false;
 		}
 
+		// All mipmap levels need to be initialized - for color formats we can
+		// clear the base mip and use glGenerateMipmap after that's done. Depth
+		// and stencil formats don't always support glGenerateMipmap so we need
+		// to individually clear each mip level in that case. We avoid doing that
+		// for color formats because of an Intel driver bug:
+		// https://github.com/love2d/love/issues/1585
+		int clearmips = 1;
+		if (isPixelFormatDepthStencil(format))
+			clearmips = mipmapCount;
+
 		// Create a canvas-local FBO used for glReadPixels as well as MSAA blitting.
-		status = createFBO(fbo, texType, format, texture, texType == TEXTURE_VOLUME ? depth : layers, mipmapCount);
+		status = createFBO(fbo, texType, format, texture, texType == TEXTURE_VOLUME ? depth : layers, clearmips);
 
 		if (status != GL_FRAMEBUFFER_COMPLETE)
 		{
@@ -272,17 +284,26 @@ bool Canvas::loadVolatile()
 			}
 			return false;
 		}
+
+		if (clearmips < mipmapCount && getMipmapMode() != MIPMAPS_NONE)
+			generateMipmaps();
 	}
 
 	if (!isReadable() || actualSamples > 0)
 		createRenderbuffer(pixelWidth, pixelHeight, actualSamples, format, renderbuffer);
 
-	int64 memsize = getPixelFormatSize(format) * pixelWidth * pixelHeight;
-	if (getMipmapCount() > 1)
-		memsize *= 1.33334;
+	int64 memsize = 0;
+
+	for (int mip = 0; mip < getMipmapCount(); mip++)
+	{
+		int w = getPixelWidth(mip);
+		int h = getPixelHeight(mip);
+		int slices = getDepth(mip) * layers * (texType == TEXTURE_CUBE ? 6 : 1);
+		memsize += getPixelFormatSize(format) * w * h * slices;
+	}
 
 	if (actualSamples > 1 && isReadable())
-		memsize += getPixelFormatSize(format) * pixelWidth * pixelHeight * actualSamples;
+		memsize += memsize * actualSamples;
 	else if (actualSamples > 1)
 		memsize *= actualSamples;
 
@@ -463,6 +484,9 @@ void Canvas::generateMipmaps()
 {
 	if (getMipmapCount() == 1 || getMipmapMode() == MIPMAPS_NONE)
 		throw love::Exception("generateMipmaps can only be called on a Canvas which was created with mipmaps enabled.");
+
+	if (isPixelFormatDepthStencil(format))
+		throw love::Exception("generateMipmaps cannot be called on a depth/stencil Canvas.");
 
 	gl.bindTextureToUnit(this, 0, false);
 

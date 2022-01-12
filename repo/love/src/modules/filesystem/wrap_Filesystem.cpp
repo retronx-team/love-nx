@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2020 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -28,6 +28,10 @@
 #include "data/wrap_DataModule.h"
 
 #include "physfs/Filesystem.h"
+
+#ifdef LOVE_ANDROID
+#include "common/android.h"
+#endif
 
 // SDL
 #include <SDL_loadso.h>
@@ -138,6 +142,7 @@ int w_mount(lua_State *L)
 		bool append = luax_optboolean(L, startidx + 1, false);
 
 		luax_pushboolean(L, instance()->mount(data, archive.c_str(), mountpoint, append));
+		return 1;
 	}
 	else if (luax_istype(L, 1, DroppedFile::type))
 	{
@@ -213,7 +218,10 @@ File *luax_getfile(lua_State *L, int idx)
 		file = instance()->newFile(filename);
 	}
 	else
+	{
 		file = luax_checkfile(L, idx);
+		file->retain();
+	}
 
 	return file;
 }
@@ -226,7 +234,6 @@ FileData *luax_getfiledata(lua_State *L, int idx)
 	if (lua_isstring(L, idx) || luax_istype(L, idx, File::type))
 	{
 		file = luax_getfile(L, idx);
-		file->retain();
 	}
 	else if (luax_istype(L, idx, FileData::type))
 	{
@@ -259,7 +266,6 @@ Data *luax_getdata(lua_State *L, int idx)
 	if (lua_isstring(L, idx) || luax_istype(L, idx, File::type))
 	{
 		file = luax_getfile(L, idx);
-		file->retain();
 	}
 	else if (luax_istype(L, idx, Data::type))
 	{
@@ -325,11 +331,22 @@ int w_newFileData(lua_State *L)
 	}
 
 	size_t length = 0;
-	const char *str = luaL_checklstring(L, 1, &length);
+	const void *ptr = nullptr;
+	if (luax_istype(L, 1, Data::type))
+	{
+		Data *data = data::luax_checkdata(L, 1);
+		ptr = data->getData();
+		length = data->getSize();
+	}
+	else if (lua_isstring(L, 1))
+		ptr = luaL_checklstring(L, 1, &length);
+	else
+		return luaL_argerror(L, 1, "string or Data expected");
+
 	const char *filename = luaL_checkstring(L, 2);
 
 	FileData *t = nullptr;
-	luax_catchexcept(L, [&](){ t = instance()->newFileData(str, length, filename); });
+	luax_catchexcept(L, [&](){ t = instance()->newFileData(ptr, length, filename); });
 
 	luax_pushtype(L, t);
 	t->release();
@@ -488,24 +505,17 @@ int w_read(lua_State *L)
 	if (data == nullptr)
 		return luax_ioError(L, "File could not be read.");
 
-	int nret = 0;
-
 	if (ctype == love::data::CONTAINER_DATA)
-	{
 		luax_pushtype(L, data);
-		nret = 1;
-	}
 	else
-	{
 		lua_pushlstring(L, (const char *) data->getData(), data->getSize());
-		lua_pushinteger(L, data->getSize());
-		nret = 2;
-	}
+
+	lua_pushinteger(L, data->getSize());
 
 	// Lua has a copy now, so we can free it.
 	data->release();
 
-	return nret;
+	return 2;
 }
 
 static int w_write_or_append(lua_State *L, File::Mode mode)
@@ -727,7 +737,7 @@ static void replaceAll(std::string &str, const std::string &substr, const std::s
 
 int loader(lua_State *L)
 {
-	std::string modulename = luax_tostring(L, 1);
+	std::string modulename = luax_checkstring(L, 1);
 
 	for (char &c : modulename)
 	{
@@ -768,7 +778,7 @@ static const char *library_extensions[] =
 
 int extloader(lua_State *L)
 {
-	const char *filename = lua_tostring(L, -1);
+	std::string filename = luax_checkstring(L, 1);
 	std::string tokenized_name(filename);
 	std::string tokenized_function(filename);
 
@@ -786,6 +796,23 @@ int extloader(lua_State *L)
 
 	void *handle = nullptr;
 	auto *inst = instance();
+
+#ifdef LOVE_ANDROID
+	// Specifically Android, look the library path based on getCRequirePath first
+	std::string androidPath(love::android::getCRequirePath());
+
+	if (!androidPath.empty())
+	{
+		// Replace ? with just the dotted filename (not tokenized_name)
+		replaceAll(androidPath, "?", filename);
+
+		// Load directly, don't check for existence.
+		handle = SDL_LoadObject(androidPath.c_str());
+	}
+
+	if (!handle)
+	{
+#endif // LOVE_ANDROID
 
 	for (const std::string &el : inst->getCRequirePath())
 	{
@@ -815,6 +842,10 @@ int extloader(lua_State *L)
 		if (handle)
 			break;
 	}
+
+#ifdef LOVE_ANDROID
+	} // if (!handle)
+#endif
 
 	if (!handle)
 	{

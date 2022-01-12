@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -165,7 +165,7 @@ public:
 		 * initial full-size one (determined after some investigation with an
 		 * affected user on Discord.)
 		 * https://bitbucket.org/rude/love/issues/1436/bug-with-lovegraphicsprint-on-older-ati
-		 *
+		 * https://github.com/love2d/love/issues/1563
 		 **/
 		bool texStorageBreaksSubImage;
 
@@ -176,6 +176,20 @@ public:
 		 * It's possible more Adreno GPUs / drivers are affected as well.
 		 **/
 		bool brokenR8PixelFormat;
+
+		/**
+		 * Intel HD Graphics drivers on Windows prior to the HD 2500/4000 have
+		 * completely broken sRGB support.
+		 * https://github.com/love2d/love/issues/1592
+		 **/
+		bool brokenSRGB;
+
+		/**
+		 * Some Android graphics drivers claim to support GLES3.0 but have bugs
+		 * with certain aspects that users expect to work. For example:
+		 * https://github.com/love2d/love-android/issues/204
+		 **/
+		bool brokenGLES3;
 
 		/**
 		 * Other bugs which have workarounds that don't use conditional code at
@@ -237,7 +251,7 @@ public:
 	/**
 	 * Set all vertex attribute state.
 	 **/
-	void setVertexAttributes(const vertex::Attributes &attributes, const vertex::Buffers &buffers);
+	void setVertexAttributes(const vertex::Attributes &attributes, const vertex::BufferBindings &buffers);
 
 	/**
 	 * Wrapper for glCullFace which eliminates redundant state setting.
@@ -324,9 +338,10 @@ public:
 	 *
 	 * @param textureunit Index in the range of [0, maxtextureunits-1]
 	 * @param restoreprev Restore previously bound texture unit when done.
+	 * @param bindforedit If false, the active texture unit may be left alone.
 	 **/
-	void bindTextureToUnit(TextureType target, GLuint texture, int textureunit, bool restoreprev);
-	void bindTextureToUnit(Texture *texture, int textureunit, bool restoreprev);
+	void bindTextureToUnit(TextureType target, GLuint texture, int textureunit, bool restoreprev, bool bindforedit = true);
+	void bindTextureToUnit(Texture *texture, int textureunit, bool restoreprev, bool bindforedit = true);
 
 	/**
 	 * Helper for deleting an OpenGL texture.

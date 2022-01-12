@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2019 LOVE Development Team
+ * Copyright (c) 2006-2022 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -153,6 +153,7 @@ public:
 	virtual bool isGamepadDown(const std::vector<GamepadButton> &blist) const = 0;
 
 	virtual JoystickInput getGamepadMapping(const GamepadInput &input) const = 0;
+	virtual std::string getGamepadMappingString() const = 0;
 
 	virtual void *getHandle() const = 0;
 
