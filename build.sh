@@ -54,7 +54,7 @@ echo "** NRO **"
 
 mkdir -p "$DIST_DIR"
 
-cp -vf "$BUILD_DIR/love/love" "$DIST_DIR/$APP_NAME.elf"
+cp -vf "$BUILD_DIR/love/love.elf" "$DIST_DIR/$APP_NAME.elf"
 "$DEVKITPRO/tools/bin/nacptool" --create "$APP_TITLE" "$APP_AUTHOR" "$APP_VERSION" "$DIST_DIR/$APP_NAME.nacp"
 "$DEVKITPRO/tools/bin/elf2nro" "$DIST_DIR/$APP_NAME.elf" "$DIST_DIR/$APP_NAME.nro" --icon="$APP_ICON" --nacp="$DIST_DIR/$APP_NAME.nacp"
 echo "Built $DIST_DIR/$APP_NAME.nro"
