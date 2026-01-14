@@ -1,6 +1,6 @@
 /*
 ** OS library.
-** Copyright (C) 2005-2021 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2026 Mike Pall. See Copyright Notice in luajit.h
 **
 ** Major portions taken verbatim or adapted from the Lua interpreter.
 ** Copyright (C) 1994-2008 Lua.org, PUC-Rio. See Copyright Notice in lua.h
@@ -76,7 +76,7 @@ LJLIB_CF(os_rename)
 
 LJLIB_CF(os_tmpname)
 {
-#if LJ_TARGET_PS3 || LJ_TARGET_PS4 || LJ_TARGET_PSVITA
+#if LJ_TARGET_PS3 || LJ_TARGET_PS4 || LJ_TARGET_PS5 || LJ_TARGET_PSVITA || LJ_TARGET_NX
   lj_err_caller(L, LJ_ERR_OSUNIQF);
   return 0;
 #else
@@ -171,7 +171,8 @@ static int getfield(lua_State *L, const char *key, int d)
 LJLIB_CF(os_date)
 {
   const char *s = luaL_optstring(L, 1, "%c");
-  time_t t = luaL_opt(L, (time_t)luaL_checknumber, 2, time(NULL));
+  time_t t = lua_isnoneornil(L, 2) ? time(NULL) :
+	     lj_num2int_type(luaL_checknumber(L, 2), time_t);
   struct tm *stm;
 #if LJ_TARGET_POSIX
   struct tm rtm;
@@ -253,8 +254,9 @@ LJLIB_CF(os_time)
 
 LJLIB_CF(os_difftime)
 {
-  lua_pushnumber(L, difftime((time_t)(luaL_checknumber(L, 1)),
-			     (time_t)(luaL_optnumber(L, 2, (lua_Number)0))));
+  lua_pushnumber(L,
+    difftime(lj_num2int_type(luaL_checknumber(L, 1), time_t),
+	     lj_num2int_type(luaL_optnumber(L, 2, (lua_Number)0), time_t)));
   return 1;
 }
 
