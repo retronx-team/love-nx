@@ -16,7 +16,7 @@ fi
 echo "** env **"
 
 source "$DEVKITPRO/switchvars.sh"
-CFLAGS="$CFLAGS -g -I$PORTLIBS_PREFIX/include  -I$PORTLIBS_PREFIX/include/SDL2 -D__SWITCH__ -I$DEVKITPRO/libnx/include"
+CFLAGS="$CFLAGS -g -I$PORTLIBS_PREFIX/include -I$PORTLIBS_PREFIX/include/freetype2 -I$PORTLIBS_PREFIX/include/SDL2 -D__SWITCH__ -I$DEVKITPRO/libnx/include"
 export SDL2DIR="$PORTLIBS_PREFIX"
 
 function switch_cmake() {
@@ -44,6 +44,7 @@ cd "$BUILD_DIR/love"
 switch_cmake \
 	-DPHYSFS_LIBRARY="$PORTLIBS_PREFIX/lib/libphysfs.a" \
 	-DOPENAL_LIBRARY="$PORTLIBS_PREFIX/lib/libopenal.a" \
+	-DFREETYPE_LIBRARY="$PORTLIBS_PREFIX/lib/libfreetype.a;$PORTLIBS_PREFIX/lib/libharfbuzz.a" \
 	-DLUAJIT_LIBRARY="$BUILD_DIR/luajit/src/libluajit.a" \
 	-DLUAJIT_INCLUDE_DIR="$ROOT_DIR/repo/luajit/src" \
 	"$ROOT_DIR/repo/love"
