@@ -25,10 +25,8 @@ jobs:
       - name: deps
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential cmake pkg-config
-          git clone --depth 1 https://github.com/devkitPro/pacman-packages /tmp/dkp-pacman-pkgs
-          cp -f /tmp/dkp-pacman-pkgs/dkp-toolchain-vars/*.sh $DEVKITPRO/.
-          rm -rf /tmp/dkp-pacman-pkgs
+          DEBIAN_FRONTEND=noninteractive apt-get install -y git
+          git config --global safe.directory '*'
       - name: checkout
         uses: actions/checkout@v2
         with:
@@ -37,7 +35,7 @@ jobs:
         run: |
           ./build.sh
       - name: store
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist
