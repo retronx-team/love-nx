@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2022 LOVE Development Team
+ * Copyright (c) 2006-2023 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -1160,6 +1160,19 @@ int Source::streamAtomic(ALuint buffer, love::sound::Decoder *d)
 			decoded = 0;
 	}
 
+	// This shouldn't run after toLoop is calculated in this streamAtomic call,
+	// otherwise it'll decrease too quickly.
+	// TODO: this code is hard to understand, can it be made more clear?
+	// It's meant to reset offsetSamples once OpenAL starts processing the first
+	// queued buffer after a loop.
+	if (toLoop > 0)
+	{
+		if (--toLoop == 0)
+		{
+			offsetSamples = 0;
+		}
+	}
+
 	if (decoder->isFinished() && isLooping())
 	{
 		int queued, processed;
@@ -1170,14 +1183,6 @@ int Source::streamAtomic(ALuint buffer, love::sound::Decoder *d)
 		else
 			toLoop = buffers-processed;
 		d->rewind();
-	}
-
-	if (toLoop > 0)
-	{
-		if (--toLoop == 0)
-		{
-			offsetSamples = 0;
-		}
 	}
 
 	return decoded;

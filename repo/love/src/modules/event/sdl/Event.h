@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2022 LOVE Development Team
+ * Copyright (c) 2006-2023 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -77,10 +77,6 @@ private:
 
 	static std::map<SDL_Keycode, love::keyboard::Keyboard::Key> createKeyMap();
 	static std::map<SDL_Keycode, love::keyboard::Keyboard::Key> keys;
-
-#ifdef LOVE_ANDROID
-	std::vector<love::audio::Source*> pausedSources;
-#endif
 
 }; // Event
 

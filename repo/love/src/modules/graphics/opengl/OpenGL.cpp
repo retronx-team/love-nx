@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2022 LOVE Development Team
+ * Copyright (c) 2006-2023 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -154,7 +154,7 @@ bool OpenGL::initContext()
 	if (getVendor() == VENDOR_AMD)
 	{
 		bugs.clearRequiresDriverTextureStateUpdate = true;
-		if (!gl.isCoreProfile())
+		if (!gl.isCoreProfile() && !GLAD_ES_VERSION_2_0)
 			bugs.generateMipmapsRequiresTexture2DEnable = true;
 	}
 #endif
@@ -1701,7 +1701,14 @@ OpenGL::TextureFormat OpenGL::convertPixelFormat(PixelFormat pixelformat, bool r
 
 	if (!isPixelFormatCompressed(pixelformat))
 	{
-		if (GLAD_ES_VERSION_2_0 && !(GLAD_ES_VERSION_3_0 && pixelformat == PIXELFORMAT_LA8)
+		// glTexImage in OpenGL ES 2 only accepts internal format enums that
+		// match the external format. GLES3 doesn't have that restriction - 
+		// except for GL_LUMINANCE_ALPHA which doesn't have a sized version in
+		// ES3. However we always use RG8 for PIXELFORMAT_LA8 on GLES3 so it
+		// doesn't matter there.
+		// Also note that GLES2+extension sRGB format enums are different from
+		// desktop GL and GLES3+ (this is handled above).
+		if (GLAD_ES_VERSION_2_0 && !GLAD_ES_VERSION_3_0
 			&& !renderbuffer && !isTexStorageSupported())
 		{
 			f.internalformat = f.externalformat;

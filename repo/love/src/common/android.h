@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2022 LOVE Development Team
+ * Copyright (c) 2006-2023 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -102,6 +102,12 @@ void deinitializeVirtualArchive();
 bool checkFusedGame(void **physfsIO_Out);
 
 const char *getCRequirePath();
+
+/**
+ * Retrieve PHYSFS_AndroidInit structure.
+ * @return Pointer to PHYSFS_AndroidInit structure, casted to pointer of char.
+ */
+const char *getArg0();
 
 } // android
 } // love

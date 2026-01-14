@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2022 LOVE Development Team
+ * Copyright (c) 2006-2023 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -68,6 +68,11 @@ LOVE_EXPORT DWORD AmdPowerXpressRequestHighPerformance = 1;
 #ifdef LOVE_LEGENDARY_APP_ARGV_HACK
 
 #include <vector>
+
+// Explicitly instantiate std::vector<std::string> to work around linker issues
+// with libc++ when symbols are hidden-by-default.
+// https://stackoverflow.com/a/48273604
+template class std::vector<std::string>;
 
 static void get_app_arguments(int argc, char **argv, int &new_argc, char **&new_argv)
 {
@@ -166,7 +171,7 @@ static DoneAction runlove(int argc, char **argv, int &retval)
 
 	// LuaJIT-specific setup needs to be done as early as possible - before
 	// get_app_arguments because that loads external library code. This is also
-	// loaded inside require("love"). Note that it doesn't use the love table.
+	// loaded inside love's Lua threads. Note that it doesn't use the love table.
 	love_preload(L, luaopen_love_jitsetup, "love.jitsetup");
 	lua_getglobal(L, "require");
 	lua_pushstring(L, "love.jitsetup");

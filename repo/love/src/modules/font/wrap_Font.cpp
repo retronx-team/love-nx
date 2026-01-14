@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2020 LOVE Development Team
+ * Copyright (c) 2006-2023 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -154,7 +154,7 @@ int w_newBMFontRasterizer(lua_State *L)
 			lua_pop(L, 1);
 		}
 	}
-	else
+	else if (!lua_isnoneornil(L, 2))
 	{
 		convimagedata(L, 2);
 		image::ImageData *id = luax_checktype<image::ImageData>(L, 2);

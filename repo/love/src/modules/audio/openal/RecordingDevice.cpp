@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2022 LOVE Development Team
+ * Copyright (c) 2006-2023 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -67,7 +67,11 @@ bool RecordingDevice::start(int samples, int sampleRate, int bitDepth, int chann
 	if (isRecording())
 		stop();
 
+	// This hard-crashes on iOS with Apple's OpenAL implementation, even when
+	// the user gives permission to the app.
+#ifndef LOVE_IOS
 	device = alcCaptureOpenDevice(name.c_str(), sampleRate, format, samples);
+#endif
 	if (device == nullptr)
 		return false;
 

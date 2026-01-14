@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2022 LOVE Development Team
+ * Copyright (c) 2006-2023 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -30,6 +30,7 @@
 // C++
 #include <algorithm>
 #include <iostream>
+#include <cstdint>
 #include <cstdio>
 #include <cstddef>
 #include <cmath>
@@ -105,6 +106,10 @@ static bool luax_isfulllightuserdatasupported(lua_State *L)
 	static bool checked = false;
 	static bool supported = false;
 
+	if (sizeof(void*) == 4)
+		// 32-bit platforms always supports full-lightuserdata.
+		return true;
+
 	if (!checked)
 	{
 		lua_pushcclosure(L, [](lua_State *L) -> int
@@ -135,17 +140,21 @@ static ObjectKey luax_computeloveobjectkey(lua_State *L, love::Object *object)
 	// can store all possible integers up to 2^53. We can store pointers that
 	// use more than 53 bits if their alignment is guaranteed to be more than 1.
 	// For example an alignment requirement of 8 means we can shift the
-	// pointer's bits by 3.
-	const size_t minalign = LOVE_ALIGNOF(std::max_align_t);
+	// pointer's bits by 3. However, this is not always reliable on 32-bit platforms
+	// as can be seen in this bug report: https://github.com/love2d/love/issues/1916.
+	// It appears to be ABI violation. However it seems there's no reliable way to
+	// get the correct alignment pre-C++17. Consider that 32-bit pointer still fits
+	// in 2^53 range, it's perfectly fine to assume alignment of 1 there.
+	const size_t minalign = sizeof(void*) == 8 ? LOVE_ALIGNOF(std::max_align_t) : 1;
 	uintptr_t key = (uintptr_t) object;
 
 	if ((key & (minalign - 1)) != 0)
 	{
 		luaL_error(L, "Cannot push love object to Lua: unexpected alignment "
-				   "(pointer is %p but alignment should be %d)", object, minalign);
+				   "(pointer is %p but alignment should be %d)", object, (int) minalign);
 	}
 
-	static const size_t shift = (size_t) log2(LOVE_ALIGNOF(std::max_align_t));
+	static const size_t shift = (size_t) log2(minalign);
 
 	key >>= shift;
 

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2022 LOVE Development Team
+ * Copyright (c) 2006-2023 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -116,16 +116,14 @@ void Image::loadData()
 	{
 		if (isCompressed() && (texType == TEXTURE_2D_ARRAY || texType == TEXTURE_VOLUME))
 		{
+			int mipslices = data.getSliceCount(mip);
 			size_t mipsize = 0;
 
-			if (texType == TEXTURE_2D_ARRAY || texType == TEXTURE_VOLUME)
-			{
-				for (int slice = 0; slice < data.getSliceCount(mip); slice++)
-					mipsize += data.get(slice, mip)->getSize();
-			}
+			for (int slice = 0; slice < mipslices; slice++)
+				mipsize += data.get(slice, mip)->getSize();
 
 			GLenum gltarget = OpenGL::getGLTextureType(texType);
-			glCompressedTexImage3D(gltarget, mip, fmt.internalformat, w, h, d, 0, mipsize, nullptr);
+			glCompressedTexImage3D(gltarget, mip, fmt.internalformat, w, h, mipslices, 0, mipsize, nullptr);
 		}
 
 		for (int slice = 0; slice < slicecount; slice++)

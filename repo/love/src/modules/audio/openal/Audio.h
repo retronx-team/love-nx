@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2022 LOVE Development Team
+ * Copyright (c) 2006-2023 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -176,6 +176,16 @@ private:
 
 	DistanceModel distanceModel;
 	//float metersPerUnit = 1.0;
+
+#ifdef LOVE_ANDROID
+#	ifndef ALC_SOFT_pause_device
+	typedef void (ALC_APIENTRY*LPALCDEVICEPAUSESOFT)(ALCdevice *device);
+	typedef void (ALC_APIENTRY*LPALCDEVICERESUMESOFT)(ALCdevice *device);
+#	endif
+	LPALCDEVICEPAUSESOFT alcDevicePauseSOFT;
+	LPALCDEVICERESUMESOFT alcDeviceResumeSOFT;
+	std::vector<love::audio::Source*> pausedSources;
+#endif
 }; // Audio
 
 #ifdef ALC_EXT_EFX

@@ -3,7 +3,7 @@ R"luastring"--(
 -- There is a matching delimiter at the bottom of the file.
 
 --[[
-Copyright (c) 2006-2022 LOVE Development Team
+Copyright (c) 2006-2023 LOVE Development Team
 
 This software is provided 'as-is', without any express or implied
 warranty.  In no event will the authors be held liable for any damages
@@ -310,6 +310,13 @@ function love.init()
 			assert(love.image, "If an icon is set in love.conf, love.image must be loaded!")
 			love.window.setIcon(love.image.newImageData(c.window.icon))
 		end
+	end
+
+	-- The first couple event pumps on some systems (e.g. macOS) can take a
+	-- while. We'd rather hit that slowdown here than in event processing
+	-- within the first frames.
+	if love.event then
+		for i = 1, 2 do love.event.pump() end
 	end
 
 	-- Our first timestep, because window creation can take some time

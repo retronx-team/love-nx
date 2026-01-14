@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2006-2022 LOVE Development Team
+# Copyright (c) 2006-2023 LOVE Development Team
 #
 # This software is provided 'as-is', without any express or implied
 # warranty.  In no event will the authors be held liable for any damages
@@ -36,7 +36,12 @@ set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
 set (CMAKE_CXX_STANDARD 11)
 
-if(MSVC)
+if(APPLE)
+	message(WARNING "CMake is not an officially supported build system for love on Apple platforms.")
+	message(WARNING "Use the prebuilt .app or the xcode project in platform/xcode/ instead.")
+endif()
+
+if(MSVC OR MINGW)
 	set(LOVE_CONSOLE_EXE_NAME lovec)
 endif()
 
@@ -48,12 +53,16 @@ else()
 	set(LOVE_TARGET_PLATFORM x86)
 endif()
 
-option(LOVE_JIT "Use LuaJIT" TRUE)
+if(APPLE)
+	option(LOVE_JIT "Use LuaJIT" FALSE)
+else()
+	option(LOVE_JIT "Use LuaJIT" TRUE)
+endif()
 option(LOVE_MPG123 "Use mpg123" TRUE)
 
 if(LOVE_JIT)
 	if(APPLE)
-		message(FATAL_ERROR "JIT not supported yet on Mac. Please use -DLOVE_JIT=0.")
+		message(WARNING "JIT not supported yet on Mac.")
 	endif()
 	message(STATUS "LuaJIT: Enabled")
 else()
@@ -68,6 +77,10 @@ message(STATUS "Target platform: ${LOVE_TARGET_PLATFORM}")
 
 if(POLICY CMP0072)
 	cmake_policy(SET CMP0072 NEW)
+endif()
+
+if(POLICY CMP0063)
+	cmake_policy(SET CMP0063 NEW)
 endif()
 
 find_package(OpenGL)
@@ -166,8 +179,8 @@ if(MEGA)
 else()
 	if(MSVC)
 		message(FATAL_ERROR "
-It is currently only possible to build with megasource on Windows.
-Please see http://bitbucket.org/rude/megasource
+It is currently only possible to build with megasource or (experimental) mingw on Windows.
+Please see https://github.com/love2d/megasource
 ")
 	endif()
 
@@ -179,7 +192,7 @@ if(NINTENDO_SWITCH)
 else()
 	find_package(OpenGL REQUIRED)
 endif()
-	find_package(SDL2 REQUIRED)
+	find_package(SDL2 REQUIRED CONFIG COMPONENTS SDL2main)
 	find_package(Theora REQUIRED)
 	find_package(Vorbis REQUIRED)
 	find_package(ZLIB REQUIRED)
@@ -189,7 +202,7 @@ endif()
 	add_definitions(-D HAS_SOCKLEN_T)
 
 	set(LOVE_INCLUDE_DIRS
-		${SDL2_INCLUDE_DIR}
+		${SDL2_INCLUDE_DIRS}
 		${FREETYPE_INCLUDE_DIRS}
 		${VORBIS_INCLUDE_DIR}
 		${OPENAL_INCLUDE_DIR}
@@ -201,7 +214,7 @@ endif()
 
 	set(LOVE_LINK_LIBRARIES
 		${OPENGL_gl_LIBRARY}
-		${SDL2_LIBRARY}
+		${SDL2_LIBRARIES}
 		${FREETYPE_LIBRARY}
 		${OPENAL_LIBRARY}
 		${MODPLUG_LIBRARY}
@@ -321,6 +334,9 @@ if (APPLE)
 	set(LOVE_SRC_COMMON ${LOVE_SRC_COMMON}
 		src/common/macosx.mm
 	)
+	set(LOVE_LINK_LIBRARIES ${LOVE_LINK_LIBRARIES} objc)
+	set(LOVE_LINK_LIBRARIES ${LOVE_LINK_LIBRARIES} "-framework CoreFoundation")
+	set(LOVE_LINK_LIBRARIES ${LOVE_LINK_LIBRARIES} "-framework AppKit")
 endif()
 
 if (NINTENDO_SWITCH)
@@ -471,6 +487,8 @@ set(LOVE_SRC_MODULE_FILESYSTEM_PHYSFS
 	src/modules/filesystem/physfs/File.h
 	src/modules/filesystem/physfs/Filesystem.cpp
 	src/modules/filesystem/physfs/Filesystem.h
+	src/modules/filesystem/physfs/PhysfsIo.h
+	src/modules/filesystem/physfs/PhysfsIo.cpp
 )
 
 set(LOVE_SRC_MODULE_FILESYSTEM
@@ -1308,6 +1326,9 @@ set(LOVE_SRC_3P_ENET
 add_library(love_3p_enet ${LOVE_SRC_3P_ENET})
 target_link_libraries(love_3p_enet ${LOVE_LUA_LIBRARY})
 target_include_directories(love_3p_enet PUBLIC src/libraries/enet/libenet/include)
+if(MINGW)
+	target_link_libraries(love_3p_enet winmm.a)
+endif()
 
 #
 # GLAD
@@ -1403,7 +1424,7 @@ set(LOVE_SRC_3P_GLSLANG_GLSLANG_OSDEPENDENT
 	src/libraries/glslang/glslang/OSDependent/osinclude.h
 )
 
-if(MSVC)
+if(MSVC OR MINGW)
 	set(LOVE_SRC_3P_GLSLANG_GLSLANG_OSDEPENDENT
 		${LOVE_SRC_3P_GLSLANG_GLSLANG_OSDEPENDENT}
 		src/libraries/glslang/glslang/OSDependent/Windows/main.cpp
@@ -1503,7 +1524,13 @@ set(LOVE_SRC_3P_LUASOCKET_LIBLUASOCKET
 
 set(LOVE_LINK_L3P_LUASOCKET_LIBLUASOCKET)
 
-if(MSVC)
+if(MINGW)
+	set(WIN32_LIB_EXT .a)
+else()
+	set(WIN32_LIB_EXT .lib)
+endif()
+
+if(MSVC OR MINGW)
 	set(LOVE_SRC_3P_LUASOCKET_LIBLUASOCKET
 		${LOVE_SRC_3P_LUASOCKET_LIBLUASOCKET}
 		src/libraries/luasocket/libluasocket/wsocket.c
@@ -1512,7 +1539,7 @@ if(MSVC)
 
 	set(LOVE_LINK_L3P_LUASOCKET_LIBLUASOCKET
 		${LOVE_LINK_L3P_LUASOCKET_LIBLUASOCKET}
-		ws2_32.lib
+		ws2_32${WIN32_LIB_EXT}
 	)
 elseif(NINTENDO_SWITCH)
 	set(LOVE_SRC_3P_LUASOCKET_LIBLUASOCKET
@@ -1624,6 +1651,7 @@ if(APPLE)
 	set(LOVE_SRC_3P_PHYSFS ${LOVE_SRC_3P_PHYSFS}
 		src/libraries/physfs/physfs_platform_apple.m
 	)
+	set(LOVE_LINK_LIBRARIES ${LOVE_LINK_LIBRARIES} "-framework IOKit")
 endif()
 
 if(NOT NINTENDO_SWITCH)
@@ -1754,6 +1782,7 @@ set(LOVE_LIB_SRC
 )
 
 include_directories(
+	BEFORE
 	src
 	src/libraries
 	src/modules
@@ -1764,16 +1793,23 @@ link_directories(${LOVE_LINK_DIRS})
 
 set(LOVE_RC)
 
-if(MSVC)
+if(MSVC OR MINGW)
 	set(LOVE_LINK_LIBRARIES ${LOVE_LINK_LIBRARIES}
-		ws2_32.lib
-		winmm.lib
+		ws2_32${WIN32_LIB_EXT}
+		winmm${WIN32_LIB_EXT}
+		dwmapi${WIN32_LIB_EXT}
 	)
 
 	set(LOVE_RC
 		extra/windows/love.rc
 		extra/windows/love.ico
 	)
+
+	if(MINGW)
+		# UTF-16 flags passed to windres. windres invokes gcc as preprocessor
+		# -> gcc outputs utf8, so windres must read-in codepage 65001 (utf8)
+		set(CMAKE_RC_FLAGS ${CMAKE_RC_FLAGS} "-c 65001 --preprocessor-arg=-finput-charset=UTF-16LE")
+	endif()
 endif()
 
 if(NINTENDO_SWITCH)
@@ -1782,6 +1818,7 @@ if(NINTENDO_SWITCH)
 else()
 	add_library(${LOVE_LIB_NAME} SHARED ${LOVE_LIB_SRC} ${LOVE_RC})
 endif()
+set_target_properties(${LOVE_LIB_NAME} PROPERTIES C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 target_link_libraries(${LOVE_LIB_NAME} ${LOVE_LINK_LIBRARIES} ${LOVE_3P})
 
 if(LOVE_EXTRA_DEPENDECIES)
@@ -1798,8 +1835,9 @@ endif()
 #
 add_executable(${LOVE_EXE_NAME} WIN32 src/love.cpp ${LOVE_RC})
 target_link_libraries(${LOVE_EXE_NAME} ${LOVE_LIB_NAME})
+set_target_properties(${LOVE_EXE_NAME} PROPERTIES C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 
-if(MSVC)
+if(MSVC OR MINGW)
 	add_executable(${LOVE_CONSOLE_EXE_NAME} src/love.cpp ${LOVE_RC})
 	target_link_libraries(${LOVE_CONSOLE_EXE_NAME} ${LOVE_LIB_NAME})
 endif()
@@ -1827,7 +1865,7 @@ if(LOVE_MOVE_DLLS)
 	endforeach()
 endif()
 
-if (NOT MSVC)
+if (NOT MSVC OR MINGW)
 	return()
 endif()
 

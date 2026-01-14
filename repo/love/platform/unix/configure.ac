@@ -1,4 +1,4 @@
-AC_INIT([love], [11.4])
+AC_INIT([love], [11.5])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_AUX_DIR([platform/unix])
 AC_CONFIG_MACRO_DIR([platform/unix/m4])
@@ -28,6 +28,10 @@ AC_DEFUN([LOVE_MSG_ERROR],
 
 # C++11 support in cpp11.m4
 ACLOVE_CPP11_TEST
+
+# Add -fvisibility=hidden and -fvisibility-inlines-hidden
+CFLAGS="-fvisibility=hidden $CFLAGS"
+CXXFLAGS="-fvisibility=hidden -fvisibility-inlines-hidden $CXXFLAGS"
 
 # Allow people on OSX to use autotools, they need their platform files
 AC_ARG_ENABLE([osx],

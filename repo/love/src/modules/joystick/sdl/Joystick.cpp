@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2022 LOVE Development Team
+ * Copyright (c) 2006-2023 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -323,7 +323,9 @@ std::string Joystick::getGamepadMappingString() const
 	// Matches SDL_GameControllerAddMappingsFromRW.
 	if (mappingstr.find_last_of(',') != mappingstr.length() - 1)
 		mappingstr += ",";
-	mappingstr += "platform:" + std::string(SDL_GetPlatform());
+
+	if (mappingstr.find("platform:") == std::string::npos)
+		mappingstr += "platform:" + std::string(SDL_GetPlatform());
 
 	return mappingstr;
 }

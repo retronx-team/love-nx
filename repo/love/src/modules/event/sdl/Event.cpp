@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2006-2022 LOVE Development Team
+ * Copyright (c) 2006-2023 LOVE Development Team
  *
  * This software is provided 'as-is', without any express or implied
  * warranty.  In no event will the authors be held liable for any damages
@@ -53,6 +53,13 @@ static void windowToDPICoords(double *x, double *y)
 	auto window = Module::getInstance<window::Window>(Module::M_WINDOW);
 	if (window)
 		window->windowToDPICoords(x, y);
+}
+
+static void clampToWindow(double *x, double *y)
+{
+	auto window = Module::getInstance<window::Window>(Module::M_WINDOW);
+	if (window)
+		window->clampPositionInWindow(x, y);
 }
 
 #ifndef LOVE_MACOSX
@@ -261,8 +268,16 @@ Message *Event::convert(const SDL_Event &e)
 			double y = (double) e.motion.y;
 			double xrel = (double) e.motion.xrel;
 			double yrel = (double) e.motion.yrel;
+
+			// SDL reports mouse coordinates outside the window bounds when click-and-
+			// dragging. For compatibility we clamp instead since user code may not be
+			// able to handle out-of-bounds coordinates. SDL has a hint to turn off
+			// auto capture, but it doesn't report the mouse's position at the edge of
+			// the window if the mouse moves fast enough when it's off.
+			clampToWindow(&x, &y);
 			windowToDPICoords(&x, &y);
 			windowToDPICoords(&xrel, &yrel);
+
 			vargs.emplace_back(x);
 			vargs.emplace_back(y);
 			vargs.emplace_back(xrel);
@@ -288,7 +303,10 @@ Message *Event::convert(const SDL_Event &e)
 
 			double px = (double) e.button.x;
 			double py = (double) e.button.y;
+
+			clampToWindow(&px, &py);
 			windowToDPICoords(&px, &py);
+
 			vargs.emplace_back(px);
 			vargs.emplace_back(py);
 			vargs.emplace_back((double) button);
@@ -635,20 +653,9 @@ Message *Event::convertWindowEvent(const SDL_Event &e)
 		if (auto audio = Module::getInstance<audio::Audio>(Module::M_AUDIO))
 		{
 			if (e.window.event == SDL_WINDOWEVENT_MINIMIZED)
-			{
-				for (auto &src : pausedSources)
-					src->release();
-				pausedSources = audio->pause();
-				for (auto &src : pausedSources)
-					src->retain();
-			}
+				audio->pauseContext();
 			else if (e.window.event == SDL_WINDOWEVENT_RESTORED)
-			{
-				audio->play(pausedSources);
-				for (auto &src : pausedSources)
-					src->release();
-				pausedSources.resize(0);
-			}
+				audio->resumeContext();
 		}
 #endif
 		break;
